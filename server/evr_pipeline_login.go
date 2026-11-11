@@ -747,6 +747,10 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 
 	params.ignoreSuspensionsOfAltAccounts = loginHistory.IgnoreSuspensionsOfAltAccounts
 
+	// Count the account once per nevr-runtime version per UTC day. Before Update, which overwrites the
+	// history this decides from.
+	recordNevrVersionFirstSeen(logger, p.nk.metrics, nevrVersionLabels, loginHistory, params.profile.ID(), params.loginPayload, time.Now())
+
 	// Ensure the current login entry is in history so alt search includes it.
 	loginHistory.Update(params.xpID, session.clientIP, params.loginPayload, params.IsWebsocketAuthenticated)
 	if _, err := loginHistory.UpdateAlternates(ctx, p.runtimeLogger, p.nk); err != nil {

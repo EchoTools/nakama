@@ -1,6 +1,9 @@
 package server
 
 import (
+	"time"
+
+	"go.uber.org/zap"
 	"regexp"
 	"strings"
 	"sync"
@@ -103,4 +106,45 @@ func (s *SessionParameters) nevrIdentity() *evr.NevrIdentity {
 		return nil
 	}
 	return s.loginPayload.NevrIdentity
+}
+
+// nevrVersionFirstSeenCounter counts accounts, not logins: it is incremented the first time an account
+// logs in with a given nevr-runtime version on a given UTC day. increase(...[1d]) by nevr_version is the
+// number of distinct accounts that ran each version that day. The login declares no install id, so the
+// account is the unit; an account on two machines counts once.
+const nevrVersionFirstSeenCounter = "nevr_version_first_seen"
+
+// nevrVersionFirstSeenToday reports whether history holds no login of this normalized version at or after
+// the start of now's UTC day. The history is what the login path already loads and stores per account, so
+// the answer survives a restart. Known overcount: Update overwrites an entry's LoginData, so an account
+// that goes v1, v2, v1 on one IP in one day counts v1 twice.
+func nevrVersionFirstSeenToday(h *LoginHistory, version string, now time.Time) bool {
+	dayStart := now.UTC().Truncate(24 * time.Hour)
+	for _, e := range h.History {
+		if e == nil || e.LoginData == nil || e.UpdatedAt.Before(dayStart) {
+			continue
+		}
+		if normalizeNevrVersion(e.LoginData.NevrIdentity) == version {
+			return false
+		}
+	}
+	return true
+}
+
+// recordNevrVersionFirstSeen increments nevrVersionFirstSeenCounter when this login is the account's first
+// of its version today. It must run before the login is written into h. The label is bounded by labels.
+func recordNevrVersionFirstSeen(logger *zap.Logger, m Metrics, labels *nevrVersionLabeler, h *LoginHistory, userID string, login *evr.LoginProfile, now time.Time) {
+	var identity *evr.NevrIdentity
+	if login != nil {
+		identity = login.NevrIdentity
+	}
+	if !nevrVersionFirstSeenToday(h, normalizeNevrVersion(identity), now) {
+		return
+	}
+	label := labels.label(identity)
+	m.CustomCounter(nevrVersionFirstSeenCounter, map[string]string{nevrVersionTag: label}, 1)
+	logger.Info("nevr version first seen",
+		zap.String("user_id", userID),
+		zap.String(nevrVersionTag, label),
+		zap.String("day", now.UTC().Format("2006-01-02")))
 }
