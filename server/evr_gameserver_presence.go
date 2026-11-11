@@ -112,6 +112,12 @@ func (g *GameServerPresence) CanHostLevel(level evr.Symbol) bool {
 	return slices.Contains(g.InstalledLevels, level)
 }
 
+// HasInstalledLevel reports whether the server explicitly lists level as
+// installed. Unlike CanHostLevel, a server that reported no levels returns false.
+func (g *GameServerPresence) HasInstalledLevel(level evr.Symbol) bool {
+	return g != nil && slices.Contains(g.InstalledLevels, level)
+}
+
 func NewGameServerPresence(userId, sessionId uuid.UUID, serverId uint64, internalIP, externalIP net.IP, port uint16, groupIDs []uuid.UUID, defaultRegion string, regionCodes []string, versionLock evr.Symbol, tags, features []string, timeStepUsecs uint32, ipInfo IPInfo, geoPrecision int, isNative bool, nativeVersion string) *GameServerPresence {
 
 	var asn int

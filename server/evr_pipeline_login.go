@@ -60,11 +60,41 @@ func (e AccountDisabledError) Is(target error) bool {
 	return ok
 }
 
+// BlockedQuestVersionError refuses the login of a standalone Quest client on a nevr-runtime version the
+// operator listed in blocked_quest_versions. Its message is what the player is shown.
+type BlockedQuestVersionError struct {
+	message string
+}
+
+func (e BlockedQuestVersionError) Error() string {
+	return e.message
+}
+
 type NewLocationError struct {
 	guildName   string
 	code        string
 	botUsername string
 	useDMs      bool
+}
+
+// newLocationCheckNotRequired reports whether the new-location check is skipped for this login: the
+// IP is already authorized, or the session proved its identity out of band. A session is
+// authenticated when its websocket carried a valid token (session.userID is set by socket_ws.go) or
+// when the login websocket itself was authenticated (params.IsWebsocketAuthenticated, set by
+// NewSessionWS). Such a session has nothing further to prove by location, so a new IP does not
+// refuse it. An unauthenticated login from a new IP returns false and is still checked.
+//
+// The skip for an authenticated session from a new IP is logged at Info. logger must already carry
+// the xpid, as loginRequest arranges.
+func newLocationCheckNotRequired(logger *zap.Logger, session *sessionWS, params *SessionParameters, ipAuthorized bool) bool {
+	if ipAuthorized {
+		return true
+	}
+	if !params.IsWebsocketAuthenticated && session.userID.IsNil() {
+		return false
+	}
+	logger.Info("Skipped new-location check: session authenticated by token", zap.String("reason", "token_authenticated"))
+	return true
 }
 
 // ipVerificationLocationError picks how to tell a player their IP is
@@ -354,6 +384,18 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 		return err
 	}
 
+	// Refuse a listed Quest version here, before authorizeSession records login history or emits
+	// EventUserAuthenticated. The permissions lookup runs only for a login that matches the list.
+	if err = blockedQuestVersionRefusal(logger, ServiceSettings(), params.xpID.Token(), session.clientIP, params.profile.ID(), params.BuildNumber(), params.NevrRuntimeVersion(), func() (bool, error) {
+		perms, err := ResolveUserPermissions(ctx, p.db, params.profile.ID())
+		if err != nil {
+			return false, err
+		}
+		return perms.IsGlobalOperator || perms.IsGlobalDeveloper, nil
+	}); err != nil {
+		return err
+	}
+
 	if params.profile, err = EVRProfileLoad(ctx, p.nk, params.profile.ID()); err != nil {
 		return fmt.Errorf("failed to get account: %w", err)
 	}
@@ -367,6 +409,50 @@ func (p *EvrPipeline) processLoginRequest(ctx context.Context, logger *zap.Logge
 	}
 
 	return nil
+}
+
+// blockedQuestVersionRefusal decides whether blocked_quest_versions refuses a login. It returns the
+// BlockedQuestVersionError to send the player, or nil to admit the login.
+//
+// Only a standalone Quest login (buildversion == StandaloneBuildNumber) whose nevr_identity.version is listed
+// is refused, with a leading "v" ignored on both sides. PCVR clients are never refused. exempt runs only for a
+// listed login and reports whether the account is a Global Operator or Global Developer. A lookup error refuses
+// the login, because the exemption cannot be proven.
+//
+// The version is declared by the client, so this stops a client that reports the blocked version honestly. It
+// is not an access control.
+func blockedQuestVersionRefusal(logger *zap.Logger, settings *ServiceSettingsData, xpid, clientIP, uid string, buildNumber evr.BuildNumber, nevrVersion string, exempt func() (bool, error)) error {
+	version := strings.TrimPrefix(nevrVersion, "v")
+	if version == "" || buildNumber != evr.StandaloneBuildNumber {
+		return nil
+	}
+	listed := slices.ContainsFunc(settings.BlockedQuestVersions, func(v string) bool {
+		return strings.TrimPrefix(v, "v") == version
+	})
+	if !listed {
+		return nil
+	}
+
+	isExempt, err := exempt()
+	if err != nil {
+		return fmt.Errorf("failed to resolve user permissions: %w", err)
+	}
+	if isExempt {
+		return nil
+	}
+
+	logger.Info("Rejected login: blocked Quest version",
+		zap.String("xpid", xpid),
+		zap.String("client_ip", clientIP),
+		zap.String("uid", uid),
+		zap.String("nevr_version", nevrVersion),
+	)
+
+	message := settings.BlockedQuestVersionsMessage
+	if message == "" {
+		message = "This game version is blocked on this server."
+	}
+	return BlockedQuestVersionError{message: message}
 }
 
 // authenticateSession handles the authentication of the login connection.
@@ -583,8 +669,8 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("failed to load login history: %w", err)
 	}
 
-	// Require IP verification, if the session is not authenticated.
-	if !params.IsWebsocketAuthenticated && !loginHistory.IsAuthorizedIP(session.clientIP) {
+	// Require IP verification, unless the IP is authorized or the session was authenticated (see newLocationCheckNotRequired).
+	if !newLocationCheckNotRequired(logger, session, params, loginHistory.IsAuthorizedIP(session.clientIP)) {
 
 		// IP is not authorized. Add a pending authorization entry.
 		//
@@ -879,6 +965,15 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		}
 	}
 
+	if serviceSettings.SyncGuildMembersWithoutIntent() {
+		params.guildGroups, err = syncGuildMembersAndReloadGroups(ctx, logger, params.profile.DiscordID(), params.guildGroups, true, p.discordCache.syncMember, func() (map[string]*GuildGroup, error) {
+			return GuildUserGroupsList(ctx, p.nk, p.guildGroupRegistry, params.profile.ID())
+		})
+		if err != nil {
+			return fmt.Errorf("failed to reload guild groups after role sync: %w", err)
+		}
+	}
+
 	if len(params.guildGroups) == 0 {
 		// User is not in any groups, and the default group could not be joined.
 		metricsTags["error"] = "user_not_in_any_groups"
@@ -1044,28 +1139,11 @@ func (p *EvrPipeline) initializeSession(ctx context.Context, logger *zap.Logger,
 		logger.Warn("Failed to check display name owner", zap.Any("display_names", displayNames), zap.Error(err))
 	} else {
 		// Prune the in-game names that are owned by someone else.
-		for _, dn := range params.profile.DisplayNamesByGroupID() {
-			if ownerIDs, ok := ownerMap[dn]; ok && !slices.Contains(ownerIDs, params.profile.ID()) {
-				// This display name is owned by someone else.
-				displayNamesOwnedByOthers = append(displayNamesOwnedByOthers, dn)
-				for gID, gn := range params.profile.DisplayNamesByGroupID() {
-					if strings.EqualFold(gn, dn) {
-						// This display name is owned by someone else.
-						params.profile.DeleteGroupDisplayName(gID)
-						if serviceSettings.DisplayNameInUseNotifications {
-							// Notify the player that this display name is in use.
-							ownerDiscordID := p.discordCache.UserIDToDiscordID(ownerIDs[0])
-							go func(displayName string) {
-								if err := p.discordCache.SendDisplayNameInUseNotification(ctx, notifyDiscordID, ownerDiscordID, displayName, notifyUsername); err != nil {
-									if IsDiscordErrorCode(err, discordgo.ErrCodeCannotSendMessagesToThisUser) {
-										logger.Warn("Failed to send display name in use notification", zap.Error(err))
-									}
-								}
-							}(dn)
-						}
-					}
-				}
-			}
+		var notices []displayNameNotice
+		displayNamesOwnedByOthers, notices = pruneDisplayNamesOwnedByOthers(params.profile, displayNameHistory, ownerMap, serviceSettings.DisplayNameInUseNotifications, time.Now())
+		if len(notices) > 0 {
+			player := displayNameNoticePlayer{UserID: params.profile.ID(), DiscordID: notifyDiscordID, Username: notifyUsername}
+			go sendDisplayNameNotices(ctx, logger, p.discordCache.displayNameNoticeDeps(), player, notices)
 		}
 	}
 

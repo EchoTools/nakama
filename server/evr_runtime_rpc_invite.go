@@ -3,9 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -155,14 +153,6 @@ func normalizeInviteCode(raw string) (string, bool) {
 	return code, true
 }
 
-// inviteCodeFingerprint identifies a code in logs without revealing it. A code
-// is a bearer secret and the code space is small (31^5), so any long digest of
-// it is reversible by enumeration; 16 bits leaves hundreds of codes per value.
-func inviteCodeFingerprint(code string) string {
-	sum := sha256.Sum256([]byte("invite-code:" + code))
-	return hex.EncodeToString(sum[:2])
-}
-
 // ---- attempt limiter -----------------------------------------------------
 
 // inviteAttemptLimiter is a token bucket per key (user id, source address).
@@ -253,7 +243,7 @@ type inviteRecord struct {
 	args    map[string]any
 	matchID string
 	groupID string
-	code    string // never logged; its fingerprint is
+	code    string // logged as `code`
 	errText string
 }
 
@@ -270,8 +260,8 @@ func inviteRecordFrom(ctx context.Context) *inviteRecord {
 // writes exactly one structured record: who (user, session, client, address),
 // what (the operation, its arguments, the resolved match and guild ids), the
 // outcome, the latency and the size of the answer. It is the single point the
-// three RPCs pass through. The code is a bearer secret: only its fingerprint
-// is written.
+// three RPCs pass through. The code is written as `code`, as
+// the request carried it.
 func withInviteRecord(op string, fn func(context.Context, runtime.Logger, *sql.DB, runtime.NakamaModule, string) (string, error)) func(context.Context, runtime.Logger, *sql.DB, runtime.NakamaModule, string) (string, error) {
 	return func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 		start := inviteNow()
@@ -312,7 +302,7 @@ func withInviteRecord(op string, fn func(context.Context, runtime.Logger, *sql.D
 			fields["group_id"] = rec.groupID
 		}
 		if rec.code != "" {
-			fields["code_fp"] = inviteCodeFingerprint(rec.code)
+			fields["code"] = rec.code
 			fields["code_len"] = len(rec.code)
 		}
 		if rec.errText != "" {

@@ -87,6 +87,16 @@ func TestIsExpectedUserError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "invalid level (every server refused the level)",
+			err:  fmt.Errorf("failed to allocate game server: %w", NewLobbyErrorf(BadRequest, "invalid level")),
+			want: true,
+		},
+		{
+			name: "other bad request stays Error",
+			err:  NewLobbyErrorf(BadRequest, "something else"),
+			want: false,
+		},
+		{
 			name: "grpc Internal (DB/storage) stays Error",
 			err:  status.Error(codes.Internal, "failed to read latency history"),
 			want: false,

@@ -39,6 +39,13 @@ type lobbyJoinModeratorFixture struct {
 
 func newLobbyJoinModeratorFixture(t *testing.T, lobbyGroupID uuid.UUID, userID uuid.UUID, sessionParams *SessionParameters, requestedRole int) *lobbyJoinModeratorFixture {
 	t.Helper()
+	// This fixture has no Discord cache; keep the gateway-intent path so the
+	// join does not try a REST member sync. Member sync has its own tests.
+	previous := ServiceSettings()
+	updated := *previous
+	updated.RequestGuildMembersIntent = true
+	ServiceSettingsUpdate(&updated)
+	t.Cleanup(func() { ServiceSettingsUpdate(previous) })
 
 	registry := newMockFollowMatchRegistry()
 	matchID := MatchID{UUID: uuid.Must(uuid.NewV4()), Node: "testnode"}

@@ -68,6 +68,11 @@ func TestTypeStatsToScoreMap_Realistic(t *testing.T) {
 		opTag := structField.Tag.Get("op")
 		opParts := strings.Split(opTag, ",")
 
+		// op:"-" fields are not leaderboard stats on this path.
+		if opParts[0] == "-" {
+			continue
+		}
+
 		// Check for zero value and omitzero flag
 		isZero := false
 		switch field.Kind() {

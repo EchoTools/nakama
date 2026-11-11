@@ -61,25 +61,42 @@ func filterRemoteLogs(logs []string) []string {
 	return filteredLogs
 }
 
-const (
-	maxRemoteLogEntries = 50         // max log entries per packet
-	maxRemoteLogPayload = 256 * 1024 // 256KB total payload limit
-)
+// maxRemoteLogPayload is the byte cap on one set's entries; it is the OOM guard
+// from 12d90d0ab, whose measured cause was queued JSON copies of whole payloads,
+// i.e. bytes. There is deliberately no cap on entry count: memory follows bytes,
+// and the wire decoder already refuses more than evr.MaxStringTableEntries
+// (1024) entries. A 50-entry cap here cut an 8-player post-match set (72
+// entries) before POST_MATCH_MATCH_TYPE_STATS reached most of its players.
+const maxRemoteLogPayload = 256 * 1024 // 256KB total payload limit
 
-func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, _ *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
-	// Gate oversized payloads early
-	if len(request.Logs) > maxRemoteLogEntries {
-		request.Logs = request.Logs[:maxRemoteLogEntries]
-	}
-
+// capRemoteLogs applies the payload gates to a set's raw entries and returns
+// the entries to keep. It must run before filtering.
+func capRemoteLogs(logs []string) []string {
 	totalSize := 0
-	for i, log := range request.Logs {
+	for i, log := range logs {
 		totalSize += len(log)
 		if totalSize > maxRemoteLogPayload {
-			request.Logs = request.Logs[:i]
-			break
+			return logs[:i]
 		}
 	}
+	return logs
+}
+
+// applyRemoteLogCaps caps a set's entries and, when anything was dropped,
+// says so: one Warn naming the session, the entries kept and the entries dropped.
+func applyRemoteLogCaps(logger *zap.Logger, sessionID string, logs []string) []string {
+	kept := capRemoteLogs(logs)
+	if dropped := len(logs) - len(kept); dropped > 0 {
+		logger.Warn("Remote log set truncated by payload cap",
+			zap.String("sid", sessionID),
+			zap.Int("kept", len(kept)),
+			zap.Int("dropped", dropped))
+	}
+	return kept
+}
+
+func (p *EvrPipeline) processRemoteLogSets(ctx context.Context, logger *zap.Logger, session *sessionWS, evrID evr.EvrId, request *evr.RemoteLogSet) error {
+	request.Logs = applyRemoteLogCaps(logger, session.id.String(), request.Logs)
 
 	// Filter once, use everywhere
 	filteredLogs := filterRemoteLogs(request.Logs)

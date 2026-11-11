@@ -126,12 +126,23 @@ type ServiceSettingsData struct {
 	EnableContinuousGameserverHealthCheck  bool   `json:"enable_continuous_gameserver_health_check"`
 	DisplayNameInUseNotifications          bool   `json:"display_name_in_use_notifications"` // Display name in use notifications
 	EnableSessionDebug                     bool   `json:"enable_session_debug"`
-	version                                string
-	serviceStatusMessage                   string
-	PingServerBeforeJoin                   bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
-	EnableVibinatorsGravity                bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
-	UseQuestEncoderFlags                   bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
-	CGNAT                                  CGNATSettings `json:"cgnat"`
+	// RequestGuildMembersIntent asks Discord for the privileged GUILD_MEMBERS
+	// intent and uses member gateway events. Off by default: members are synced
+	// over REST instead. Changing it takes effect after a process restart.
+	RequestGuildMembersIntent bool `json:"request_guild_members_intent"`
+	version                   string
+	serviceStatusMessage      string
+	PingServerBeforeJoin      bool          `json:"ping_server_before_join"`   // Ping the server before joining to measure latency
+	EnableVibinatorsGravity   bool          `json:"enable_vibinators_gravity"` // Novelty: redirect social-lobby echo_arena matchmakers toward vibinator's echo_combat
+	UseQuestEncoderFlags      bool          `json:"use_quest_encoder_flags"`   // Send Quest-shifted encoder flag bit layout in LobbySessionSuccessv5 for standalone clients
+	CGNAT                     CGNATSettings `json:"cgnat"`
+
+	// BlockedQuestVersions refuses the login of a standalone Quest client whose nevr_identity.version (leading
+	// "v" ignored) is listed, unless the account is a Global Operator or Global Developer. Empty changes nothing.
+	// PCVR clients are never refused by it.
+	BlockedQuestVersions []string `json:"blocked_quest_versions"`
+	// BlockedQuestVersionsMessage is what a refused Quest login is shown. Empty uses a default.
+	BlockedQuestVersionsMessage string `json:"blocked_quest_versions_message"`
 }
 
 // CGNATSettings configures detection of CGNAT and shared-IP providers
@@ -250,6 +261,8 @@ type GlobalMatchmakingSettings struct {
 	QualityFloorMinimum            float64                 `json:"quality_floor_minimum"`               // Floor never drops below this value (default 0.0)
 	EnableArchetypeBalancing       *bool                   `json:"enable_archetype_balancing"`          // Use archetype data to prefer balanced team compositions as a tiebreaker (default false, needs tuning)
 	EnableCombatMatchmaking        bool                    `json:"enable_combat_matchmaking"`           // Enable combat-specific matchmaking: split party tickets and allow uneven teams
+	CombatDrawTolerance            float64                 `json:"combat_draw_tolerance"`               // Combat team sort: how far (in draw probability) a split that keeps every party together may fall short of the closest-to-draw split and still be taken (default 0.003; 0 = default)
+	CombatSplitPenaltyWeight       float64                 `json:"combat_split_penalty_weight"`         // Combat team sort: when parties must be split, mu points charged per moved player, multiplied by (1 + that player's recent-split score) (default 1.0; 0 = default)
 }
 
 type QueryAddons struct {
@@ -380,6 +393,12 @@ var ValidTeamStatFields = map[string]bool{
 	"TwoPointGoals": true,
 }
 
+// SyncGuildMembersWithoutIntent reports whether members are synced over REST
+// rather than through the privileged GUILD_MEMBERS gateway intent.
+func (s *ServiceSettingsData) SyncGuildMembersWithoutIntent() bool {
+	return !s.RequestGuildMembersIntent
+}
+
 func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData) {
 
 	// Initialize skill rating defaults
@@ -474,6 +493,17 @@ func FixDefaultServiceSettings(logger runtime.Logger, data *ServiceSettingsData)
 
 	if data.Matchmaking.SBMMMinPlayerCount == 0 {
 		data.Matchmaking.SBMMMinPlayerCount = 24
+	}
+
+	// Combat team sort (#775): a party is kept together unless that costs more
+	// than this much draw probability against the closest-to-draw split; when it
+	// is split, each unit of the moved player's recent-split score costs this
+	// many mu points.
+	if data.Matchmaking.CombatDrawTolerance <= 0 {
+		data.Matchmaking.CombatDrawTolerance = DefaultCombatDrawTolerance
+	}
+	if data.Matchmaking.CombatSplitPenaltyWeight <= 0 {
+		data.Matchmaking.CombatSplitPenaltyWeight = DefaultCombatSplitPenaltyWeight
 	}
 
 	// Set default party skill boost (10% = 0.10)

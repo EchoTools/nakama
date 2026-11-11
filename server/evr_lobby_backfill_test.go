@@ -398,8 +398,7 @@ func TestPrepareMatches_NilGameServerEntriesExcluded(t *testing.T) {
 }
 
 // TestCandidateServerBlacklisted verifies the blacklist guard used on every
-// backfill placement, including the Combat pair-join path where the second
-// player is paired into a match they did not pick.
+// backfill placement.
 func TestCandidateServerBlacklisted(t *testing.T) {
 	t.Parallel()
 
@@ -424,27 +423,6 @@ func TestCandidateServerBlacklisted(t *testing.T) {
 				t.Fatalf("candidateServerBlacklisted(%v, %q) = %v, want %v", tc.blacklist, tc.externalIP, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestCombatPairJoinHonorsSecondPlayerBlacklist asserts that the second player
-// in a Combat even-match pair-join is NOT paired onto a server they blacklisted,
-// even though the first player selected that match.
-func TestCombatPairJoinHonorsSecondPlayerBlacklist(t *testing.T) {
-	t.Parallel()
-
-	const matchIP = "203.0.113.7"
-
-	// First player has no blacklist; they legitimately selected this match.
-	first := &preparedBackfillCandidate{BlacklistedServers: map[string]struct{}{}}
-	// Second player blacklisted exactly the match the first player landed on.
-	second := &preparedBackfillCandidate{BlacklistedServers: map[string]struct{}{matchIP: {}}}
-
-	if candidateServerBlacklisted(first, matchIP) {
-		t.Fatalf("first player should not be blocked from %s", matchIP)
-	}
-	if !candidateServerBlacklisted(second, matchIP) {
-		t.Fatalf("second player MUST be blocked from pairing onto blacklisted server %s", matchIP)
 	}
 }
 

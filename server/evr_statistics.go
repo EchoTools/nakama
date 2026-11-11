@@ -230,6 +230,14 @@ func LeaderboardMetaFromID(id string) (LeaderboardMeta, error) {
 	}, nil
 }
 
+// IsTeamSkillRatingStat reports whether statName is one of the TeamSkillRating
+// boards (Mu, Sigma, Ordinal). Two writers exist: the remote-log path (Mu and
+// Sigma) and the operator MMR RPC (Mu, Sigma and Ordinal). The Ordinal board is
+// written only by the RPC.
+func IsTeamSkillRatingStat(statName string) bool {
+	return strings.HasPrefix(statName, "TeamSkillRating")
+}
+
 func MatchmakingRatingLoad(ctx context.Context, nk runtime.NakamaModule, userID, groupID string, mode evr.Symbol) (types.Rating, error) {
 	// Look for an existing account.
 

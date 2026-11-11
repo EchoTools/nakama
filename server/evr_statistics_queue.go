@@ -17,7 +17,18 @@ type StatisticsQueueEntry struct {
 	Score       int64
 	Subscore    int64
 	Metadata    map[string]string
+	// Writer names the code path that produced the entry, and MatchID the match
+	// it reports on when known. Both are for the write log only.
+	Writer  string
+	MatchID string
 }
+
+// Writers of statistics queue entries, as recorded in the write log.
+const (
+	StatisticsWriterRemoteLog     = "remotelog"
+	StatisticsWriterProfileUpdate = "profile_update"
+	StatisticsWriterMMRRPC        = "mmr_rpc"
+)
 
 // Override converts the entry operator to a LeaderboardRecordWrite override value.
 // Always returns OperatorSet (2) — the resolved value to write — because:
@@ -189,6 +200,13 @@ func processSingleEntry(ctx context.Context, logger runtime.Logger, nk runtime.N
 		return false
 	}
 
+	isRating := IsTeamSkillRatingStat(e.BoardMeta.StatName)
+	var prev teamSkillRatingPrevious
+	if isRating {
+		prev = readTeamSkillRatingPrevious(ctx, nk, e.BoardMeta.ID(), e.UserID)
+	}
+	landed := false
+
 	if _, err := nk.LeaderboardRecordWrite(ctx, e.BoardMeta.ID(), e.UserID, e.DisplayName, e.Score, e.Subscore, md, override); err != nil {
 
 		// Try to create the leaderboard
@@ -212,12 +230,86 @@ func processSingleEntry(ctx context.Context, logger runtime.Logger, nk runtime.N
 					"score":          e.Score,
 					"subscore":       e.Subscore,
 				}).Error("Failed to write leaderboard record")
+			} else {
+				landed = true
 			}
 
 		}
+	} else {
+		landed = true
+	}
+
+	if isRating && landed {
+		logTeamSkillRatingWrite(logger, teamSkillRatingWrite{
+			UserID:  e.UserID,
+			BoardID: e.BoardMeta.ID(),
+			Stat:    e.BoardMeta.StatName,
+			Score:   e.Score, Subscore: e.Subscore,
+			Writer:  e.Writer,
+			MatchID: e.MatchID,
+		}, prev)
 	}
 
 	return true
+}
+
+// teamSkillRatingWrite describes one landed write to a TeamSkillRating board.
+// OperatorID is the calling operator's user id; empty for system writers.
+type teamSkillRatingWrite struct {
+	UserID, BoardID, Stat string
+	Score, Subscore       int64
+	Writer, MatchID       string
+	OperatorID            string
+}
+
+// teamSkillRatingPrevious is the value a write replaces. Known is false when
+// the board could not be read; Value is set only when the user had a record.
+type teamSkillRatingPrevious struct {
+	Known bool
+	Value *float64
+}
+
+// readTeamSkillRatingPrevious reads the user's current record on a board. Call
+// it before the write that replaces the record.
+func readTeamSkillRatingPrevious(ctx context.Context, nk runtime.NakamaModule, boardID, userID string) teamSkillRatingPrevious {
+	var p teamSkillRatingPrevious
+	if _, owners, _, _, err := nk.LeaderboardRecordsList(ctx, boardID, []string{userID}, 1, "", 0); err == nil {
+		p.Known = true
+		if len(owners) > 0 {
+			v, err := ScoreToFloat64(owners[0].Score, owners[0].Subscore)
+			if err != nil {
+				// A record exists but cannot be decoded: that is not "no record".
+				p.Known = false
+			} else {
+				p.Value = &v
+			}
+		}
+	}
+	return p
+}
+
+// logTeamSkillRatingWrite records one INFO line for a TeamSkillRating board
+// write, after it landed: who, which board, the value replaced
+// (previous_known=false when it could not be read), the new value, the writer
+// and the match. Every writer of these boards calls it.
+func logTeamSkillRatingWrite(logger runtime.Logger, w teamSkillRatingWrite, prev teamSkillRatingPrevious) {
+	newVal, _ := ScoreToFloat64(w.Score, w.Subscore)
+	fields := map[string]any{
+		"user_id":        w.UserID,
+		"leaderboard_id": w.BoardID,
+		"stat":           w.Stat,
+		"new_value":      newVal,
+		"writer":         w.Writer,
+		"match_id":       w.MatchID,
+		"previous_known": prev.Known,
+	}
+	if prev.Value != nil {
+		fields["previous_value"] = *prev.Value
+	}
+	if w.OperatorID != "" {
+		fields["operator_id"] = w.OperatorID
+	}
+	logger.WithFields(fields).Info("TeamSkillRating board write")
 }
 
 type StatisticsQueue struct {
