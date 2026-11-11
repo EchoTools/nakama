@@ -224,16 +224,3 @@ func (l *discordRESTLimiter) RoundTrip(req *http.Request) (*http.Response, error
 
 	return l.inner.RoundTrip(l.clampContent(req))
 }
-
-// allocateReply formats the /allocate reply. The label is shortened, not the
-// whole message, so the closing code fence and the join link survive.
-func allocateReply(labelJSON, matchID string) string {
-	const format = "Match prepared with label ```json\n%s\n```\nhttps://echo.taxi/spark://c/%s"
-	reply := fmt.Sprintf(format, labelJSON, matchID)
-	if utf8.RuneCountInString(reply) <= discordMaxContentRunes {
-		return reply
-	}
-	overhead := utf8.RuneCountInString(fmt.Sprintf(format, "", matchID)) + utf8.RuneCountInString(discordContentTruncatedMarker)
-	runes := []rune(labelJSON)
-	return fmt.Sprintf(format, string(runes[:discordMaxContentRunes-overhead])+discordContentTruncatedMarker, matchID)
-}

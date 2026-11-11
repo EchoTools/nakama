@@ -141,19 +141,6 @@ func TestDiscordRESTClampLeavesOtherRequestsAlone(t *testing.T) {
 	})
 }
 
-func TestAllocateReplyFitsAndKeepsTheJoinLink(t *testing.T) {
-	id := "6B2E2B8E-0000-4000-8000-000000000000"
-	for _, label := range []string{"{}", strings.Repeat("あ", 5000), strings.Repeat(`  "k": "v",`+"\n", 600)} {
-		got := allocateReply(label, id)
-		if n := utf8.RuneCountInString(got); n > 2000 {
-			t.Fatalf("reply is %d runes", n)
-		}
-		if !strings.HasSuffix(got, "```\nhttps://echo.taxi/spark://c/"+id) {
-			t.Fatalf("closing fence/join link lost: %q", got[max(0, len(got)-80):])
-		}
-	}
-}
-
 // logRecorder captures what the limiter logs, to prove no token is written.
 type logRecorder struct {
 	runtime.Logger
