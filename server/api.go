@@ -599,33 +599,6 @@ func extractClientAddressFromRequest(logger *zap.Logger, r *http.Request) (strin
 	return extractClientAddress(logger, clientAddr, r, "request")
 }
 
-// redactSensitiveHeaders copies headers for logging, replacing only credential
-// values with "[REDACTED]": Authorization, Proxy-Authorization, Cookie,
-// Set-Cookie, X-Api-Key, and any name ending in token, secret or password.
-// Exact names, not substrings: Sec-WebSocket-Key is a public handshake nonce
-// and X-Authenticated-User / WWW-Authenticate carry no credential. It accepts
-// http.Header and gRPC metadata (lower-case keys).
-func redactSensitiveHeaders[H ~map[string][]string](h H) map[string][]string {
-	out := make(map[string][]string, len(h))
-	for k, v := range h {
-		if isCredentialHeader(k) {
-			out[k] = []string{"[REDACTED]"}
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
-func isCredentialHeader(name string) bool {
-	switch n := strings.ToLower(name); n {
-	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key":
-		return true
-	default:
-		return strings.HasSuffix(n, "token") || strings.HasSuffix(n, "secret") || strings.HasSuffix(n, "password")
-	}
-}
-
 func extractClientAddress(logger *zap.Logger, clientAddr string, source interface{}, sourceType string) (string, string) {
 	var clientIP, clientPort string
 
@@ -653,12 +626,8 @@ func extractClientAddress(logger *zap.Logger, clientAddr string, source interfac
 	}
 
 	if clientIP == "" {
-		switch src := source.(type) {
-		case *http.Request:
-			source = map[string]interface{}{"headers": redactSensitiveHeaders(src.Header), "remote_addr": src.RemoteAddr}
-		case context.Context:
-			md, _ := metadata.FromIncomingContext(src)
-			source = map[string]interface{}{"headers": redactSensitiveHeaders(md)}
+		if r, isRequest := source.(*http.Request); isRequest {
+			source = map[string]interface{}{"headers": r.Header, "remote_addr": r.RemoteAddr}
 		}
 		logger.Warn("cannot extract client address", zap.String("address_source_type", sourceType), zap.Any("address_source", source))
 	}
