@@ -109,7 +109,7 @@ func (l *LobbyType) UnmarshalJSON(b []byte) error {
 	}
 	switch strings.ToLower(s) {
 	default:
-		i, err := strconv.Atoi(s)
+		i, err := strconv.ParseUint(s, 10, 8)
 		if err != nil {
 			return err
 		}
@@ -168,7 +168,7 @@ func MarshalText(t TeamIndex) ([]byte, error) {
 func (t *TeamIndex) UnmarshalText(b []byte) error {
 	switch strings.ToLower(string(b)) {
 	default:
-		i, err := strconv.Atoi(string(b))
+		i, err := strconv.ParseInt(string(b), 10, 16)
 		if err != nil {
 			return err
 		}
