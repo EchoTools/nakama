@@ -15,6 +15,8 @@ type GuildGroupUpdateRequest struct {
 	AvatarURL   string         `json:"avatar_url"`
 	Open        *bool          `json:"open"`
 	Metadata    *GroupMetadata `json:"metadata"`
+	// RulesText is the rules shown in-game. nil = leave unchanged; "" = clear.
+	RulesText *string `json:"rules_text"`
 }
 
 type GuildGroupRolesUpdateRequest struct {
@@ -104,6 +106,26 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if err := GroupMetadataSave(ctx, _nk.db, req.GroupID, req.Metadata); err != nil {
 			return "", runtime.NewError("failed to save metadata", 13)
 		}
+	}
+
+	changed, err := applyRulesTextUpdate(gg, &req)
+	if err != nil {
+		return "", runtime.NewError(err.Error(), 3)
+	}
+	if changed {
+		if err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, gg.State); err != nil {
+			logger.WithField("error", err).Error("Failed to save guild rules text")
+			return "", runtime.NewError("failed to save rules", 13)
+		}
+		if appBot := globalAppBot.Load(); appBot != nil && appBot.guildGroupRegistry != nil {
+			appBot.guildGroupRegistry.Add(gg)
+		}
+		logger.WithFields(map[string]interface{}{
+			"op":         "guild/group/update",
+			"user_id":    userID,
+			"group_id":   req.GroupID,
+			"rules_text": *req.RulesText,
+		}).Info("Guild rules text updated")
 	}
 
 	return guildGroupResponse(ctx, nk, req.GroupID)
