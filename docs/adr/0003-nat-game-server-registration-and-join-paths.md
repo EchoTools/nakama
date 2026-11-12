@@ -1,9 +1,9 @@
-# ADR 0003: Game servers behind NAT register through a fixed ping port and a runtime hello; players reach them direct, punched, or relayed, chosen by nakama per join
+# ADR 0003: Game servers behind NAT register through a fixed ping port and a runtime hello; players reach them direct or relayed, chosen by nakama per join
 
 - **Status:** Proposed
 - **Date:** 2026-11-11
-- **Relates to:** ADR 0001 (internal slot must be private or empty), ADR 0002 (paired internal/external endpoint), the nakama and nevr-runtime issues on game servers behind NAT (links added at filing)
-- **Code cited at:** nakama `cb9f062ea`, nevr-runtime `3b13b55e0` (both origin/main). nakama paths are under `server/`; nevr-runtime paths under `src/`.
+- **Relates to:** ADR 0001 (internal slot must be private or empty), ADR 0002 (paired internal/external endpoint), ADR 0004 (proposed: clients never hold a hard-coded address that can't be DDoS-mitigated), the nakama and nevr-runtime issues on game servers behind NAT (links added at filing)
+- **Code cited at:** nakama `cb9f062ea`, nevr-runtime `3b13b55e0` (both origin/main). nakama paths are under `server/`; nevr-runtime paths under `src/`, except `cmake/` and `config/` at its root.
 
 ## Context
 
@@ -63,7 +63,8 @@ that filter by address alone. On port-restricted NATs, the ping has to leave fro
 - **Neither message has room for relay data.** The protobuf message has no field for relay data or credentials: the
   build site sets every field it has (`:417-434`; nevr-api pinned at `go.mod:8`). The client's frame is a fixed
   binary layout (`evr/match_session_success.go:84-112`). The runtime's translation for older clients rejects a tail of
-  any other length (nevr-runtime `runtime/compat/legacy_codec.cpp:830`, used at `:842-850`).
+  any other length (nevr-runtime `runtime/compat/legacy_codec.cpp:830`, used at `:842-850`). That is a property of
+  the game's frame, not a limit on what nakama can tell a client's runtime (see 5 and 8).
 - **The runtime does not read the endpoint.** On the client, the runtime's lobby decoder stops at the group id
   (`runtime/compat/lobby_frame.h:15`).
 - **The endpoint is a pair with one port.** It is `{InternalIP, ExternalIP, Port}` (`evr/match_ping_request.go:80-84`).
@@ -89,6 +90,8 @@ that filter by address alone. On port-restricted NATs, the ping has to leave fro
    message that says why.
 6. **Not an open relay or reflector.** Any new UDP port answers only known peers, never more bytes than it received.
 7. **Bandwidth spent on relaying is the operator's money.** It should be spent only where nothing else works.
+8. **One control connection and one game connection per client.** The client has exactly one control connection to
+   the game service and one connection to the game server, and nothing else.
 
 ## Considered alternatives
 
@@ -109,7 +112,7 @@ that filter by address alone. On port-restricted NATs, the ping has to leave fro
   itself. Players cost no bandwidth and take no detour.
 - **Rejected as the whole answer:**
   - Punching to a player needs the player's reflexive port. That means a client-side hello from the client's game
-    socket, which is a client runtime change on PC and Quest.
+    socket to a second destination, which driver 8 rules out, and a client runtime change on PC and Quest.
   - It fails whenever either side's mapping is address-and-port-dependent.
   - Published measurements: RFC 5128 §4 reports UDP hole punching working for more than 80% of NATs in a 2005
     survey, and Trautwein et al. (arXiv 2510.27500) measure 70% ± 7.1% of attempts succeeding. Our own rate is
@@ -134,9 +137,9 @@ that filter by address alone. On port-restricted NATs, the ping has to leave fro
 
 - **Registration:** alternative B's fixed port and hello.
 - **Players:**
-  - direct when the server is open;
-  - punched when both ends predict it will work;
+  - direct when the server is open, or the player is behind the same NAT;
   - relayed otherwise.
+  - Punching is left out by driver 8 (see What would change this decision).
 - **Path choice:** nakama chooses per join, before the success messages are sent.
 
 ## Decision
@@ -144,7 +147,12 @@ that filter by address alone. On port-restricted NATs, the ping has to leave fro
 ### 1. nakama pings from one fixed UDP port; the runtime says hello from the game socket first
 
 - **The ping port.** nakama binds one UDP socket on a fixed port, a global setting
-  `broadcaster_ping_port` (proposed default 6790; not 3478, which belongs to STUN).
+  `broadcaster_ping_port` (proposed: 443/udp wherever the deployment can give the ping address that port, otherwise
+  6790; not 3478, which belongs to STUN).
+  - **Why 443/udp.** An `https` URI with no port reaches HTTP/3 on UDP 443 (RFC 9114 §3.1, with the default port
+    from RFC 9110 §4.2.2), so networks that pass web traffic are expected to pass it more often than 6790.
+  - **The address must be DDoS-mitigable** (ADR 0004), like every address in 8. The runtime does not assume it: nakama
+    gives it (8).
   - Every ping leaves from that socket: registration (`evr_pipeline_gameserver.go:361`), the monitor (`:447`),
     `HealthCheckStart` (`:718`) and the operator tools (`evr_discord_appbot.go:1679`, `:1711`).
   - `HealthCheckStart` has to move too. It returns on its first read error (`evr_pipeline_gameserver.go:817-822`),
@@ -153,18 +161,20 @@ that filter by address alone. On port-restricted NATs, the ping has to leave fro
   - Replies are matched by the 8-byte ping token already in the request (`:868-878`), and by source address equal to
     the pinged address. A waiter registers its token before sending.
   - If the bind fails, nakama falls back to an ephemeral port and logs an error; it does not stop registration.
-  - The deployment must preserve the source port through any container NAT in front of nakama. That is a deploy-time
-    check, captured on the host interface.
+  - The deployment must preserve the source port through any container NAT or mitigation front in front of nakama.
+    That is a deploy-time check, captured on the host interface.
 - **The hello.**
-  - When it is enabled (see 2), the runtime sends a small hello from the game's own UDP socket to
-    `nakama:broadcaster_ping_port`, right before each registration envelope (`gameserver_serverdb.cpp:376-378`,
-    `gameserver_callbacks.cpp:1030`).
-  - The hello carries a magic value, a version byte and the `server_id`. It repeats every 10 s as a keepalive.
+  - When it is enabled (see 2), the runtime sends each registration envelope as today
+    (`gameserver_serverdb.cpp:376-378`, `gameserver_callbacks.cpp:1030`). nakama answers with the ping target and a
+    one-time token (8), and the runtime then sends a small hello from the game's own UDP socket to that target.
+  - The hello carries a magic value, a version byte, the `server_id` and the token. It repeats every 10 s as a
+    keepalive.
   - nakama never answers a hello, so the port is not a reflector.
 - **Reading the reflexive port.**
   - nakama keeps hellos for about 30 s, keyed by (source IP, `server_id`).
-  - At registration, during the existing 2 s wait (`evr_pipeline_gameserver.go:351`), it accepts a hello only if the
-    source IP equals the registration's client IP (`:188`; see Context for how it is resolved).
+  - At registration, during the existing 2 s wait (`evr_pipeline_gameserver.go:351`), it accepts a hello only if it
+    carries the token nakama just issued for this registration and its source IP equals the registration's client IP
+    (`:188`; see Context for how it is resolved).
   - It then sets `externalPort` to the hello's observed source port, logs "reflexive port X (announced Y)", and pings
     from the fixed port.
   - An explicit operator `ip:port` (`:280-299`) bypasses the hello path.
@@ -188,16 +198,16 @@ nakama's IP. So the probe comes from a **second public address**: the relay host
 | Only the fixed-port ping after a hello is acknowledged | `nat-reflexive` | registered with tag `nat-reflexive`; matchmaking and join skip it until a player path (3) exists for it |
 | No ping is acknowledged | no UDP path to nakama | `result=10` as today, with a message naming the fixed port and saying a hello was or was not seen |
 
-- **Mapping class.** The runtime also says hello to the relay host. If the two observed source ports are equal, the
-  mapping is endpoint-independent; if they differ, it is address-and-port-dependent. That class is stored on the
-  presence.
+- **Mapping class.** The runtime also says hello to the relay host, at the target nakama gave it (8). If the
+  two observed source ports are equal, the mapping is endpoint-independent; if they differ, it is
+  address-and-port-dependent. That class is stored on the presence.
 - **Rollout.** Until the second address exists, the hello is **off by default** and an operator enables it in
   config.
   - Servers that don't enable it behave exactly as today, so a hello cannot turn today's visible failure into a silent
     "registered but unreachable".
   - An enabled server is always tagged `nat-reflexive`.
 
-### 3. nakama chooses the player path per join: punched first where predicted, relay otherwise
+### 3. nakama chooses the player path per join: direct where it works, relay otherwise
 
 The client is handed exactly one endpoint, in one success frame that has no field for alternatives, and the game
 owns its connect logic. So "try direct, then fall back" cannot happen inside one join without a second success
@@ -208,24 +218,29 @@ success messages:**
 |---|---|---|
 | open | any | **direct**, as today |
 | `nat-reflexive` | same public IP as the server (behind the same NAT) | **direct**, using the private internal address (ADR 0002) |
-| `nat-reflexive`, endpoint-independent mapping | sent a client hello with endpoint-independent mapping | **punched** |
-| anything else | any | **relay** |
+| `nat-reflexive` | any other | **relay** |
 
-- **A failed punch is remembered.** If the server does not report the player connected (`evr_lobby_joinentrant.go:395-397`)
-  within a timeout, nakama marks that (server, player IP) pair, and the next join of that pair uses the relay.
-- **Punch-through first, per join, where predicted.** It costs no bandwidth and adds no detour.
-- **Relay first in build order.**
-  - The relay needs no client change, so every old PC and Quest client gets a path.
-  - It covers every NAT class, including the observed double NAT, whose outer layer's class is unknown.
-  - Punching needs a client hello from the client's game socket on both platforms, helps only pairs where both
-    mappings are endpoint-independent, and has an unmeasured success rate here.
-  - Once punching ships, it moves traffic off the relay pair by pair.
+- **No punching.** Punching toward a player needs the player's reflexive port, which only a client hello to a second
+  destination, nakama's ping port, can reveal (alternative B). Driver 8 rules that out, so the relay is the player
+  path for NAT'd servers. Punching is in What would change this decision.
+- **The relay needs no client change,** so every old PC and Quest client gets a path. It covers every NAT class,
+  including the observed double NAT, whose outer layer's class is unknown.
 
 ### 4. The relay is a plain UDP forwarder with one port per (match, player), not TURN on the wire
 
 - **Ports.** The relay host holds a bounded port range. On join, nakama allocates one relay port per player.
   - Each player needs a distinct port, because the game tells peers apart by source address: a shared port would
     merge players into one peer.
+- **One port per player against one 443 port.** Every relay address handed out must be DDoS-mitigable (ADR 0004),
+  and 443/udp is preferred for the same reason as in 1. A single 443 port per relay IP cannot also be one port per
+  player. There are three ways out, and the mitigation provider's offer decides which ships (see What would change
+  this decision):
+  - **Several relay IPs, each on 443/udp.** Each relayed player of a server gets its own IP, so the relay needs as
+    many IPs as the most relayed players one server can hold.
+  - **One port, with the server runtime tagging packets.** The server runtime adds a player id to each outgoing
+    datagram in its send hook, strips it on receive, and presents each player to the game as a distinct address. That
+    puts per-datagram work back on the server's hot path, which "Why not TURN" below otherwise avoids.
+  - **A mitigation front that covers a port range.** The relay keeps one port per player, as above.
 - **The server's side.**
   - The server's runtime sends a hello from the game socket to that relay port. The relay learns the server's mapping
     for that port from the hello's source, which is correct even for a symmetric NAT.
@@ -236,7 +251,8 @@ success messages:**
 - **Why not TURN.** TURN would put RFC 8656 framing into the game's hot path on whichever side allocates. Here the
   game sees an ordinary peer address, and the runtime's only new job is a hello.
 - **Relay host.** It runs on a public address distinct from nakama's ping address, which gives 2 its second probe
-  address. It also answers EVR pings itself, so clients can measure their latency to it.
+  address. The server learns that address from nakama (8), never by assuming it. It also answers EVR pings itself, so
+  clients can measure their latency to it.
 
 ### 5. Relay credentials: none go to the client; the server's allocation rides a new protobuf field
 
@@ -244,11 +260,15 @@ success messages:**
   - The relay admits a player by the IP nakama already knows from that player's session, pushed by nakama to the relay
     with the allocation. That is the same IP-only permission TURN's CreatePermission grants (RFC 8656 §9).
   - Admission expires with the match, or after an idle timeout.
-  - The client therefore needs no new field. Its fixed binary frame stays as it is, and old-client translation keeps
-    working (`legacy_codec.cpp:830`).
+  - The game's binary frame therefore needs no new field. It stays as it is, and old-client translation keeps working
+    (`legacy_codec.cpp:830`). Old clients keep getting that frame, so the relay-first phase needs nothing from the
+    client.
+- **A client that handles `LobbySessionSuccess` gets its relay in protobuf.** Its success message becomes the
+  protobuf `LobbySessionSuccess` (8), which carries its target: the relay, on the relay path. It needs no credential
+  beyond the authenticated session it arrives on. The game's binary frame still gets no new field.
 - **The server gets its allocation in the success message.** The relay address and port, plus a one-time token its
-  hello must carry, go in a **new field on the protobuf `SNSLobbySessionSuccessV5Message`**. That is an nevr-api
-  change, appended after the existing fields, never reusing a retired field number.
+  hello must carry, go in a **new field on the protobuf `SNSLobbySessionSuccessV5Message`**, next to its hello target
+  (8). That is an nevr-api change, appended after the existing fields, never reusing a retired field number.
   - The server runtime already decodes this message before the game sees it (`gameserver_callbacks.cpp:218-229`).
   - An older runtime ignores the unknown field. nakama must never pick the relay path for a server that did not
     declare relay support at registration.
@@ -259,10 +279,10 @@ success messages:**
 
 | Case | Registration | Players |
 |---|---|---|
-| Server, symmetric (either layer of a double NAT) | works: the mapping is learned from the fixed port itself | relay only; punching is never offered |
-| Server behind CGNAT | works. The external IP is the CGN's public address (the registration's client IP) and the port comes from the hello. CGNs that follow RFC 6888 REQ-1 must meet RFC 4787's UDP requirements, including endpoint-independent mapping (RFC 4787 REQ-1), but non-conforming CGNs exist | by measured class: punched or relay |
-| Player, symmetric or CGNAT, or a client with no hello | n/a | relay (or direct to an open server) |
-| Double NAT | behaves as its stricter layer; the hello sees the outermost mapping | as the stricter layer |
+| Server, symmetric (either layer of a double NAT) | works: the mapping is learned from the fixed port itself | relay |
+| Server behind CGNAT | works. The external IP is the CGN's public address (the registration's client IP) and the port comes from the hello. CGNs that follow RFC 6888 REQ-1 must meet RFC 4787's UDP requirements, including endpoint-independent mapping (RFC 4787 REQ-1), but non-conforming CGNs exist | relay |
+| Player, any NAT class, symmetric and CGNAT included | n/a | relay (or direct to an open server) |
+| Double NAT | behaves as its stricter layer; the hello sees the outermost mapping | relay |
 | No outbound UDP at all | `result=10`, with the reason named | n/a |
 
 - **Classes are measured, not inferred from address ranges.** nakama's CGNAT range check (`evr_pipeline_gameserver.go:40-42`)
@@ -271,12 +291,13 @@ success messages:**
 
 ### 7. How a client is told which path to use
 
-**Only through the existing `Endpoint` in its success frame.** No new field is added.
+**Through the existing `Endpoint` in the game's success frame, or the same fields in `LobbySessionSuccess`.** The
+game's binary frame gets no new field. An old client gets that frame from nakama, as today. A client that handles
+`LobbySessionSuccess` (8) gets the same endpoint in it. The table holds for both.
 
 | Path | `ExternalIP:Port` | Internal slot |
 |---|---|---|
 | direct | the server's registered (reflexive, where learned) address | the server's private internal address (ADR 0002) |
-| punched | the server's registered (reflexive, where learned) address | the server's private internal address (ADR 0002) |
 | relay | the player's relay address and port | **empty** |
 
 - **Why the internal slot is empty for relay.** The endpoint has one `Port` for both addresses
@@ -284,6 +305,55 @@ success messages:**
   is caught first by the same-public-IP row in 3.
 - **Where the substitution happens.** It is per entrant at `evr_lobby_joinentrant.go:403-405`. It is also what
   `rememberLobbySessionSuccess` keeps for a duplicate-join re-send (`:469`).
+
+### 8. How each side learns its targets: from its success message
+
+Neither side holds an address of its own for these paths. nakama decides each target and puts it in the success
+message it already sends at join. There is no separate request.
+
+- **The client gets a protobuf success message.** The join success to a client becomes a new protobuf message,
+  `LobbySessionSuccess` (no version suffix), sent in the existing envelope (below) on the client's already-authenticated
+  session.
+  - It carries the target fields: where the client's one game connection goes (driver 8), the server or, on the relay
+    path, the relay (3, 4). It arrives on the authenticated session, so it needs no separate credential.
+  - **Decided direction: the game consumes the protobuf directly.** The project's direction is to build the game
+    library (libr15) from reconstructed source. The success handling is written there, in the game's reconstructed
+    source, and reads the protobuf's fields, with no re-encode to the binary frame.
+  - **Interim: a hook on the current binary.** Until that build exists, the client runtime hooks the game's success
+    handling in the shipped binary and feeds it the protobuf's fields. That hook is not built yet.
+  - **Fallback: re-encode to the V5 frame,** for clients with neither. The runtime re-encodes the message into the
+    game's binary `SNSLobbySessionSuccessv5` frame, the pattern the server runtime already uses: it decodes its
+    protobuf success message (nevr-runtime `runtime/server/gameserver_callbacks.cpp:218-229`), encodes the game's
+    frame from it (`runtime/server/session_success_dispatch.cpp:12`, `runtime/server/messages.cpp:364`), and hands
+    the frame to the game as a local `SNSLobbySessionSuccessv5` event (`gameserver_callbacks.cpp:229`).
+  - The message reaches the client runtime on the websocket its in-process proxy already carries, where that proxy is
+    active (nevr-runtime `runtime/compat/ws_bridge.cpp:160-171`).
+  - Old clients, whose runtime handles none of this, keep getting the binary frame from nakama
+    (`evr_lobby_joinentrant.go:463-465`), so the relay-first phase needs nothing from them. Proposed: nakama sends
+    `LobbySessionSuccess` only to a client whose runtime declared that it handles it, as it picks the relay path only
+    for a server that declared relay support (5).
+  - No address is hard-coded in the client. Each comes from nakama, so per-region targets can come later without a
+    client update.
+- **The server keeps its protobuf success message,** `SNSLobbySessionSuccessV5Message`, with the same target fields
+  added next to the relay allocation in 5.
+  - **The server's targets at registration come on the same connection, before the ping.** The success message
+    arrives at join, after registration, so it cannot carry them. Instead, when nakama receives a registration
+    envelope with the hello enabled, it first answers on that websocket with a protobuf message in the same envelope
+    carrying the hello targets (its ping target from 1 and the relay host's from 2) and a one-time token the hellos
+    must carry. The runtime then sends its hellos, and nakama pings during its existing 2 s wait
+    (`evr_pipeline_gameserver.go:351`). Nothing reaches the server by a second channel, and it holds no address of
+    its own. That message is new in nevr-api.
+- **Today's protobuf success message has no field for a target or a relay** (`evr_lobby_joinentrant.go:417-434`; see
+  Context). Every target field, on `LobbySessionSuccess` and on `SNSLobbySessionSuccessV5Message`, is new in
+  nevr-api, appended after the existing fields.
+- **The envelope already exists.** `NEVRProtobufMessageV1` (symbol `0x9ee5107d9e29fd63`, `evr/core_packet.go:163`)
+  carries a marshaled nevr-api `gameservice.v1.Envelope` (`evr/core_packet_types.go:43-71`). It already carries the
+  server's success message (`evr_lobby_joinentrant.go:415-446`) and the server's registration (nevr-runtime
+  `runtime/server/gameserver_serverdb.cpp:376-378`). Only server-runtime code uses its symbol today
+  (`runtime/server/protobuf_transport.h:12`, `runtime/server/gameserver_internal.h:21`), so receiving it in the
+  client runtime is new work.
+- **Every address in these messages must be DDoS-mitigable** (ADR 0004). Because nakama picks them per join, an
+  address can move behind a mitigation front, or to another region, without a client update.
 
 ## Consequences
 
@@ -304,19 +374,21 @@ success messages:**
   hello). Ping discovery (`evr_ping_discovery.go:79-111`) and the pre-join check (`evr_lobby_prejoin_ping.go:181-201`)
   must learn to read that sum for `nat-reflexive` servers, otherwise every relay-fronted server fails pre-join.
 - **New protocol surface.**
-  - Hello format: nakama and the runtime.
+  - Hello format: nakama and the server runtime.
+  - A protobuf success message for clients, `LobbySessionSuccess` (8), and its handling on the client: in the
+    reconstructed game, by a hook in the interim, or by re-encode as the fallback.
+  - New fields in nevr-api: the target on both success messages (8), and the relay allocation on the server's (5).
   - Classification fields on the game server presence.
-  - One protobuf field (nevr-api).
   - The relay's control channel.
-  - A client hello later, for punching.
 - **New runtime work on the server.**
   - Sending from the game's socket; obtaining that socket reliably is an open question for the runtime issue.
+  - Taking its hello targets from nakama (8) instead of assuming them.
   - The hello on both registration paths.
   - The per-join relay hello.
   - Taking hello traffic out of `recvfrom` if anything ever answers it. Nothing does in this design.
 - **Bandwidth.** Every relayed player's traffic crosses the relay host twice (in and out). Echo VR traffic per player
-  is unmeasured here. The relay must count bytes per allocation and expose them, so the punch rollout can be judged
-  by how much it takes off the relay.
+  is unmeasured here. The relay must count bytes per allocation and expose them, so the relay's cost is known when
+  punching (What would change this decision) is weighed.
 - **Abuse surface.**
   - The ping port never answers anything but pings it sent, by token and source.
   - The relay forwards only between two admitted addresses per port, with a rate cap per port.
@@ -328,14 +400,39 @@ success messages:**
 
 ## What would change this decision
 
-- **The relay's cost is refused, or measured too high.** Then only 1-2 and punching ship. Symmetric and
-  CGNAT-without-EIM servers stay `nat-reflexive` and unjoinable, and say so to the operator.
+- **The relay's cost is refused, or measured too high.** Then only 1-2 ship, and NAT'd servers stay `nat-reflexive`
+  and unjoinable, and say so to the operator. Relaxing driver 8 for punching (below) would rescue only servers with
+  endpoint-independent mapping; symmetric and CGNAT-without-EIM servers would stay unjoinable.
 - **The game tolerates a second success message or a destination change mid-join.** Then a true try-direct-then-relay
   fallback inside one join would replace nakama's per-join prediction in 3.
-- **The game tolerates extra trailing bytes in the client's success frame, and the runtime reads the endpoint.**
-  Credentials could then reach the client. That would only matter if the relay moved to client-side TURN.
-- **Measured punch success for this player base is low.** If, say, under half of predicted pairs connect, punching is
-  not worth a client update, and the relay stays the only `nat-reflexive` path.
+- **The relay moves to client-side TURN.** Credentials would then have to reach the client. They would ride its
+  `LobbySessionSuccess` (8), never extra bytes in the game's binary frame, so whether the game tolerates a longer
+  frame does not matter.
+- **The mitigation provider's offer.** The relay's one port per player and a single 443/udp port pull against each
+  other (4). Several relay IPs on 443, a player-id tag in the server runtime's send hook, or a front that covers a
+  port range: which one ships is the provider's call, and the tag is the only one that adds runtime work. A front
+  that rewrites the source address or port of the hellos to nakama's ping port would break the reflexive read in 1,
+  so that port would have to stay outside such a front.
+- **443/udp cannot be had on the ping or relay address.** Then 6790 and the relay's port range stay, and the
+  mitigation front has to cover them.
+- **Driver 8 is relaxed to let the client say hello to a second destination.** Then punching could return as a path
+  between direct and relay:
+  - The client says hello from its game socket to nakama's ping port, so nakama learns its reflexive port and mapping
+    class. nakama predicts a punch only where both mappings are endpoint-independent, and the server punches toward
+    the player.
+  - A failed punch is remembered. If the server does not report the player connected
+    (`evr_lobby_joinentrant.go:395-397`) within a timeout, the next join of that (server, player IP) pair uses the
+    relay.
+  - The client's hello target would come in its `LobbySessionSuccess` (8), never from an address built into the
+    client. A built-in public default would be only the fallback when no target arrives, embedded from the runtime's
+    public defaults next to `nevr_socket_uri` (nevr-runtime `runtime/lifecycle/service_config.cpp:197-202`). Their
+    committed template is `config/public-defaults.env.example`; the build reads only that file's filled copy, never
+    `.env` (`cmake/nevr_builtin_defaults.cmake:3-8`), and accepts exactly four keys today (`:15-18`), so this would be
+    a new key.
+  - That target arrives after the join's path is chosen, so a punch could be predicted only from a hello sent after
+    an earlier join.
+  - It is worth a client update only if enough predicted pairs connect. Published rates are 70% ± 7.1% to over 80%
+    (alternative B); ours is unmeasured, and under half would not be worth it.
 - **nakama gains a second public address of its own.** The openness probe in 2 could then come from nakama, and the
   hello could default on before the relay host exists.
 - **More failures like 2026-10-31 are observed, and a forward would have fixed them.** If the next ones are on single
