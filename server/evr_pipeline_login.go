@@ -1649,9 +1649,9 @@ const clientProfileUpdateLogMessage = "Client profile update"
 // before count is taken from the profile the replace last ran against, so after
 // a conflict it is the reloaded list's, not the handler's stale copy's.
 func persistClientProfileUpdate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, profile *EVRProfile, update evr.ClientProfile) (*EVRProfile, error) {
-	before := 0
+	var storedBefore []int64
 	apply := func(p *EVRProfile) error {
-		before = len(p.NewUnlocks)
+		storedBefore = append([]int64(nil), p.NewUnlocks...)
 		applyClientProfileUpdate(p, update)
 		return nil
 	}
@@ -1662,6 +1662,7 @@ func persistClientProfileUpdate(ctx context.Context, logger *zap.Logger, nk runt
 	if update.Customization != nil {
 		clearVersion = update.Customization.ClearNewUnlocksVersion
 	}
+	added, removed := newUnlocksDiff(storedBefore, update.NewUnlocks)
 	outcome := "persisted"
 	if err != nil {
 		outcome = "not_persisted"
@@ -1669,10 +1670,11 @@ func persistClientProfileUpdate(ctx context.Context, logger *zap.Logger, nk runt
 	fields := []zap.Field{
 		zap.String("user_id", userID),
 		zap.String("operation", "UpdateClientProfile"),
-		zap.Int("new_unlocks_before", before),
-		zap.Int("new_unlocks_after", len(update.NewUnlocks)),
-		zap.Int64s("new_unlocks_entries", update.NewUnlocks),
+		zap.Int("new_unlocks_sent", len(update.NewUnlocks)),
+		zap.Int("new_unlocks_stored_before", len(storedBefore)),
 		zap.Uint64("clear_new_unlocks_version", clearVersion),
+		zap.Int64s("new_unlocks_added", added),
+		zap.Int64s("new_unlocks_removed", removed),
 		zap.String("outcome", outcome),
 	}
 	if err != nil {
@@ -1681,6 +1683,31 @@ func persistClientProfileUpdate(ctx context.Context, logger *zap.Logger, nk runt
 	logger.Info(clientProfileUpdateLogMessage, fields...)
 
 	return updated, err
+}
+
+// newUnlocksDiff returns the values in sent that are not in stored (added) and
+// the values in stored that are not in sent (removed), each in the order they
+// appear in its own list. A value present in both is in neither.
+func newUnlocksDiff(stored, sent []int64) (added, removed []int64) {
+	storedSet := make(map[int64]struct{}, len(stored))
+	for _, v := range stored {
+		storedSet[v] = struct{}{}
+	}
+	sentSet := make(map[int64]struct{}, len(sent))
+	for _, v := range sent {
+		sentSet[v] = struct{}{}
+	}
+	for _, v := range sent {
+		if _, ok := storedSet[v]; !ok {
+			added = append(added, v)
+		}
+	}
+	for _, v := range stored {
+		if _, ok := sentSet[v]; !ok {
+			removed = append(removed, v)
+		}
+	}
+	return added, removed
 }
 
 // removeTriggeredPlayers filters out EvrIds that are in the triggered set.

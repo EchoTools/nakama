@@ -46,9 +46,9 @@ func TestPersistClientProfileUpdate_ClearedNewUnlocksSurvivesConflict(t *testing
 
 // TestPersistClientProfileUpdate_LogsEveryReplaceWithCountsAndEntries pins the
 // operator record for a persisted client profile update (AGENTS.md logging rule
-// 1): exactly one INFO line carrying the account user id, the new_unlocks count
-// before and after the replace, the full entry list the client sent, the clear
-// flag as the request sent it, and the outcome.
+// 1): exactly one INFO line carrying the account user id, the count sent, the
+// count stored before, the clear flag as the request sent it, the values added
+// and removed against the stored list, and the outcome.
 func TestPersistClientProfileUpdate_LogsEveryReplaceWithCountsAndEntries(t *testing.T) {
 	ctx := context.Background()
 	const userID = "55555555-5555-4555-8555-555555555555"
@@ -63,7 +63,7 @@ func TestPersistClientProfileUpdate_LogsEveryReplaceWithCountsAndEntries(t *test
 
 	core, logs := observer.New(zapcore.DebugLevel)
 	update := evr.ClientProfile{
-		NewUnlocks:    []int64{9, 10},
+		NewUnlocks:    []int64{2, 3, 9},
 		Customization: &evr.Customization{ClearNewUnlocksVersion: 5},
 	}
 	_, err := persistClientProfileUpdate(ctx, zap.New(core), m, userID, held, update)
@@ -74,9 +74,11 @@ func TestPersistClientProfileUpdate_LogsEveryReplaceWithCountsAndEntries(t *test
 	require.Equal(t, zapcore.InfoLevel, recs[0].Level)
 	fields := recs[0].ContextMap()
 	require.Equal(t, userID, fields["user_id"])
-	require.EqualValues(t, 3, fields["new_unlocks_before"])
-	require.EqualValues(t, 2, fields["new_unlocks_after"])
-	require.Equal(t, []any{int64(9), int64(10)}, fields["new_unlocks_entries"])
+	require.EqualValues(t, 3, fields["new_unlocks_sent"])
+	require.EqualValues(t, 3, fields["new_unlocks_stored_before"])
+	require.Equal(t, []any{int64(9)}, fields["new_unlocks_added"], "added: sent but not stored before")
+	require.Equal(t, []any{int64(1)}, fields["new_unlocks_removed"], "removed: stored before but not sent")
+	require.NotContains(t, fields, "new_unlocks_entries", "the full list must not be logged on every update")
 	require.EqualValues(t, 5, fields["clear_new_unlocks_version"])
 	require.Equal(t, "persisted", fields["outcome"])
 }
@@ -109,9 +111,10 @@ func TestPersistClientProfileUpdate_LogsCountsOfTheAttemptThatCommitted(t *testi
 	recs := logs.FilterMessage(clientProfileUpdateLogMessage).All()
 	require.Len(t, recs, 1, "a retried update still logs one record; all records: %v", logs.All())
 	fields := recs[0].ContextMap()
-	require.EqualValues(t, 5, fields["new_unlocks_before"], "before must be the reloaded list the replace ran against")
-	require.EqualValues(t, 1, fields["new_unlocks_after"])
-	require.Equal(t, []any{int64(9)}, fields["new_unlocks_entries"])
+	require.EqualValues(t, 5, fields["new_unlocks_stored_before"], "before must be the reloaded list the replace ran against")
+	require.EqualValues(t, 1, fields["new_unlocks_sent"])
+	require.Equal(t, []any{int64(9)}, fields["new_unlocks_added"])
+	require.Equal(t, []any{int64(1), int64(2), int64(3), int64(4), int64(5)}, fields["new_unlocks_removed"])
 	require.Equal(t, "persisted", fields["outcome"])
 }
 
@@ -142,7 +145,8 @@ func TestPersistClientProfileUpdate_LogsFailedUpdateWithOutcome(t *testing.T) {
 	fields := recs[0].ContextMap()
 	require.Equal(t, "not_persisted", fields["outcome"])
 	require.NotEmpty(t, fields["error"])
-	require.EqualValues(t, 1, fields["new_unlocks_before"])
-	require.EqualValues(t, 2, fields["new_unlocks_after"])
-	require.Equal(t, []any{int64(4), int64(5)}, fields["new_unlocks_entries"])
+	require.EqualValues(t, 1, fields["new_unlocks_stored_before"])
+	require.EqualValues(t, 2, fields["new_unlocks_sent"])
+	require.Equal(t, []any{int64(4), int64(5)}, fields["new_unlocks_added"])
+	require.Equal(t, []any{int64(1)}, fields["new_unlocks_removed"])
 }
