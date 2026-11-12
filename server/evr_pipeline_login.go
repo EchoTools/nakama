@@ -1603,7 +1603,7 @@ func (p *EvrPipeline) handleClientProfileUpdate(ctx context.Context, logger *zap
 	// One transaction per attempt: account metadata, profile storage write and
 	// ServerProfile cache delete, via nk.MultiUpdate (evr_account.go). See the
 	// community-values write above for why the two are not merged into one.
-	updated, err := persistClientProfileUpdate(ctx, p.nk, userID, profile, update)
+	updated, err := persistClientProfileUpdate(ctx, logger, p.nk, userID, profile, update)
 	if err != nil {
 		return fmt.Errorf("failed to update account profile: %w", err)
 	}
@@ -1631,6 +1631,10 @@ func applyClientProfileUpdate(profile *EVRProfile, update evr.ClientProfile) {
 	profile.CustomizationPOIs = update.Customization
 }
 
+// clientProfileUpdateLogMessage is the message of the one INFO record every
+// client profile update writes in persistClientProfileUpdate.
+const clientProfileUpdateLogMessage = "Client profile update"
+
 // persistClientProfileUpdate applies update to profile and writes it, retrying
 // on a storage version conflict by reloading the stored profile and re-applying
 // the same update.
@@ -1639,13 +1643,44 @@ func applyClientProfileUpdate(profile *EVRProfile, update evr.ClientProfile) {
 // same key (the equip paths in evr_runtime_event_remotelogset.go and
 // evr_pipeline_gameserver_loadout.go write it around the same moments) dropped
 // the client's update, including a cleared new_unlocks, and nothing logged it.
-func persistClientProfileUpdate(ctx context.Context, nk runtime.NakamaModule, userID string, profile *EVRProfile, update evr.ClientProfile) (*EVRProfile, error) {
+//
+// This is the only path a client's new_unlocks reaches storage, so it is where
+// every update is logged: one INFO record per call, whatever the outcome. The
+// before count is taken from the profile the replace last ran against, so after
+// a conflict it is the reloaded list's, not the handler's stale copy's.
+func persistClientProfileUpdate(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, profile *EVRProfile, update evr.ClientProfile) (*EVRProfile, error) {
+	before := 0
 	apply := func(p *EVRProfile) error {
+		before = len(p.NewUnlocks)
 		applyClientProfileUpdate(p, update)
 		return nil
 	}
-	applyClientProfileUpdate(profile, update)
-	return evrProfileUpdateWithRetry(ctx, nk, userID, profile, apply)
+	_ = apply(profile) // cannot fail: it only copies fields, and the log below must run either way
+	updated, err := evrProfileUpdateWithRetry(ctx, nk, userID, profile, apply)
+
+	clearVersion := uint64(0)
+	if update.Customization != nil {
+		clearVersion = update.Customization.ClearNewUnlocksVersion
+	}
+	outcome := "persisted"
+	if err != nil {
+		outcome = "not_persisted"
+	}
+	fields := []zap.Field{
+		zap.String("user_id", userID),
+		zap.String("operation", "UpdateClientProfile"),
+		zap.Int("new_unlocks_before", before),
+		zap.Int("new_unlocks_after", len(update.NewUnlocks)),
+		zap.Int64s("new_unlocks_entries", update.NewUnlocks),
+		zap.Uint64("clear_new_unlocks_version", clearVersion),
+		zap.String("outcome", outcome),
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	logger.Info(clientProfileUpdateLogMessage, fields...)
+
+	return updated, err
 }
 
 // removeTriggeredPlayers filters out EvrIds that are in the triggered set.
