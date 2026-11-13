@@ -69,10 +69,28 @@ func (l *RuntimeGoLogger) logFromHelper(level zapcore.Level, msg string, fields 
 		return
 	}
 	l.skipOnce.Do(func() { l.skipLogger = l.logger.WithOptions(zap.AddCallerSkip(1)) })
-	if level >= zapcore.WarnLevel {
+	// WithFields drops a caller-supplied "runtime" key so nothing can override or
+	// duplicate the base runtime=go field; fields passed here bypass WithFields,
+	// so the same rule is applied here. Copy only when there is something to drop
+	// or a source field to add.
+	drop := false
+	for _, f := range fields {
+		if f.Key == "runtime" {
+			drop = true
+			break
+		}
+	}
+	if drop || level >= zapcore.WarnLevel {
 		all := make([]zap.Field, 0, len(fields)+1)
-		all = append(all, fields...)
-		fields = append(all, l.getFileLineSkip(1))
+		for _, f := range fields {
+			if f.Key != "runtime" {
+				all = append(all, f)
+			}
+		}
+		if level >= zapcore.WarnLevel {
+			all = append(all, l.getFileLineSkip(1))
+		}
+		fields = all
 	}
 	switch level {
 	case zapcore.DebugLevel:

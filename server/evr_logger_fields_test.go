@@ -114,25 +114,58 @@ func TestLogWarnKeepsFieldsStructured(t *testing.T) {
 	}
 }
 
-// Both the "source" field (runtime.Caller) and zap's own caller must name the
-// line that called LogWarn/LogError, not the helper that forwards to the logger.
+// zap's own caller must name the line that called Log*, at all four levels, not
+// the helper that forwards to the logger. The "source" field (runtime.Caller)
+// is carried only by Warn and Error, as RuntimeGoLogger.Warn/Error do.
 func TestLogHelpersReportTheCallSite(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
 	rl := NewRuntimeGoLogger(zap.New(core, zap.AddCaller()))
 
 	_, thisFile, line, _ := goruntime.Caller(0)
-	LogWarn(rl, "warn-msg", zap.String("k", "v"))   // line+1
-	LogError(rl, "error-msg", zap.String("k", "v")) // line+2
+	LogDebug(rl, "debug-msg", zap.String("k", "v")) // line+1
+	LogInfo(rl, "info-msg", zap.String("k", "v"))   // line+2
+	LogWarn(rl, "warn-msg", zap.String("k", "v"))   // line+3
+	LogError(rl, "error-msg", zap.String("k", "v")) // line+4
 
-	for i, level := range []zapcore.Level{zapcore.WarnLevel, zapcore.ErrorLevel} {
+	levels := []zapcore.Level{zapcore.DebugLevel, zapcore.InfoLevel, zapcore.WarnLevel, zapcore.ErrorLevel}
+	for i, level := range levels {
 		entries := logs.FilterLevelExact(level).All()
-		require.Len(t, entries, 1)
+		require.Len(t, entries, 1, "%s entries", level)
 		want := fmt.Sprintf("%s:%d", thisFile, line+1+i)
 		require.Equal(t, want, fmt.Sprintf("%s:%d", entries[0].Caller.File, entries[0].Caller.Line), "%s zap caller", level)
-		if level >= zapcore.WarnLevel { // Debug/Info carry no source field
-			require.Equal(t, want, entries[0].ContextMap()["source"], "%s source field", level)
+		source, hasSource := entries[0].ContextMap()["source"]
+		if level >= zapcore.WarnLevel {
+			require.True(t, hasSource, "%s must carry source", level)
+			require.Equal(t, want, source, "%s source field", level)
+		} else {
+			require.False(t, hasSource, "%s must not carry source", level)
 		}
 		require.Equal(t, "v", entries[0].ContextMap()["k"])
+	}
+}
+
+// RuntimeGoLogger.WithFields drops a caller-supplied "runtime" key so nothing
+// can override or duplicate the base runtime=go field. The Log* helpers hand
+// fields straight to zap, so they must drop it too.
+func TestLogHelpersDropRuntimeFieldKey(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	rl := NewRuntimeGoLogger(zap.New(core))
+
+	rl.WithFields(map[string]interface{}{"runtime": "lua", "k": "v"}).Info("via-with-fields")
+	LogInfo(rl, "via-helper", zap.String("runtime", "lua"), zap.String("k", "v"))
+	LogError(rl, "via-helper-error", zap.String("runtime", "lua"), zap.String("k", "v"))
+
+	require.Equal(t, 3, logs.Len())
+	for _, e := range logs.All() {
+		n := 0
+		for _, f := range e.Context {
+			if f.Key == "runtime" {
+				n++
+			}
+		}
+		require.Equal(t, 1, n, "%s: exactly one runtime key", e.Message)
+		require.Equal(t, "go", e.ContextMap()["runtime"], "%s: runtime stays go", e.Message)
+		require.Equal(t, "v", e.ContextMap()["k"], "%s: other fields kept", e.Message)
 	}
 }
 
