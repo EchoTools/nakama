@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -191,6 +190,12 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 			return "", runtime.NewError("Failed to get match label", StatusNotFound)
 		}
 
+		// Refuse before the match is touched: LobbyPrepareSession rewrites the
+		// match's group, so a refusal after it would leave the match changed.
+		if err := requireAllocatorForServer(ctx, logger, nk, userID, request.GroupId, label, isGlobalOperator || isGlobalBot); err != nil {
+			return "", err
+		}
+
 		// Prepare the session with the given match ID
 		label, err = LobbyPrepareSession(ctx, nk, label.ID, settings)
 		if err != nil {
@@ -231,15 +236,14 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				return "", runtime.NewError(err.Error(), StatusInvalidArgument)
 			}
 		}
-	}
 
-	// Guild-specified server-hosts and the server's operators may signal their own game servers.
-	// Otherwise, the game server must host for the guild.
-	if label.GameServer == nil {
-		return "", runtime.NewError("match has no game server", StatusInternalError)
-	}
-	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(request.GroupId)) {
-		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
+		// Only this branch checks after the fact: the match-ID branch was checked
+		// before it was prepared, and checking it again here could refuse a match
+		// that has already been rewritten. Here the query only offers servers that
+		// host for the target guild, so this is a backstop on the allocated label.
+		if err := requireAllocatorForServer(ctx, logger, nk, userID, request.GroupId, label, isGlobalOperator || isGlobalBot); err != nil {
+			return "", err
+		}
 	}
 
 	// Log the match preparation as an audit log message
@@ -276,6 +280,43 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 
 	// Return the match label as a JSON string
 	return string(label.GetLabelIndented()), nil
+}
+
+// requireAllocatorForServer applies the allocation rule shared with the /allocate
+// command: a caller may allocate a server for target guild T when they are
+// allocator in T (checked by the caller of this function) and allocator in at
+// least one guild the server hosts for (GameServer.GroupIDs). Global operators
+// and bots, and the server's own operator, are exempt from the second condition.
+// A caller with no allocator role in any of the server's guilds is refused.
+func requireAllocatorForServer(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, userID, targetGroupID string, label *MatchLabel, isGlobalPrivileged bool) error {
+	if label == nil || label.GameServer == nil {
+		return runtime.NewError("match has no game server", StatusInternalError)
+	}
+	if isGlobalPrivileged || label.GameServer.OperatorID.String() == userID {
+		return nil
+	}
+	for _, gid := range label.GameServer.GroupIDs {
+		hostGuild, err := GuildGroupLoad(ctx, nk, gid.String())
+		if err != nil {
+			// Fail closed: a guild that cannot be loaded confers no allocator role.
+			logger.WithFields(map[string]any{
+				"caller_id":  userID,
+				"server_gid": gid.String(),
+				"error":      err.Error(),
+			}).Warn("Could not load a guild the game server hosts for; it grants no allocator access")
+			continue
+		}
+		if hostGuild.IsAllocator(userID) {
+			return nil
+		}
+	}
+	logger.WithFields(map[string]any{
+		"caller_id":   userID,
+		"target_gid":  targetGroupID,
+		"server_gids": label.GameServer.GroupIDs,
+		"mid":         label.ID.String(),
+	}).Warn("Allocation refused: caller is not allocator in any guild the game server hosts for")
+	return runtime.NewError("user must be an allocator in a guild the game server hosts for.", StatusPermissionDenied)
 }
 
 // callerHasPrivateDataAccess reports whether the caller is in the Global Private

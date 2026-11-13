@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"net/url"
 	"reflect"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1049,10 +1048,10 @@ func PrepareMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 		return "", runtime.NewError("Failed to get match label", StatusNotFound)
 	}
 
-	// Operators may signal their own game servers.
-	// Otherwise, the game server must host for the guild.
-	if label.GameServer.OperatorID.String() != userID && !slices.Contains(label.GameServer.GroupIDs, uuid.FromStringOrNil(groupID)) {
-		return "", runtime.NewError("game server does not host for that guild.", StatusPermissionDenied)
+	// Same rule as match/allocate: allocator in the target guild (above) and in a
+	// guild the server hosts for, unless a global operator or the server's operator.
+	if err := requireAllocatorForServer(ctx, logger, nk, userID, groupID, label, isGlobalOperator); err != nil {
+		return "", err
 	}
 
 	if request.SpawnedBy != "" {
