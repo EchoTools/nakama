@@ -236,14 +236,14 @@ func AllocateMatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 				return "", runtime.NewError(err.Error(), StatusInvalidArgument)
 			}
 		}
-	}
 
-	// The fresh-allocation branch only offers servers that host for the target
-	// guild, so this holds there by construction; it is kept as the final guard
-	// on the label that is about to be returned. The match-ID branch has already
-	// been checked, before it was prepared.
-	if err := requireAllocatorForServer(ctx, logger, nk, userID, request.GroupId, label, isGlobalOperator || isGlobalBot); err != nil {
-		return "", err
+		// Only this branch checks after the fact: the match-ID branch was checked
+		// before it was prepared, and checking it again here could refuse a match
+		// that has already been rewritten. Here the query only offers servers that
+		// host for the target guild, so this is a backstop on the allocated label.
+		if err := requireAllocatorForServer(ctx, logger, nk, userID, request.GroupId, label, isGlobalOperator || isGlobalBot); err != nil {
+			return "", err
+		}
 	}
 
 	// Log the match preparation as an audit log message

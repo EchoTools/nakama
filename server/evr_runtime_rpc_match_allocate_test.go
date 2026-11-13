@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 
@@ -26,6 +29,10 @@ type allocateRPCNakama struct {
 	matchID string
 	label   *MatchLabel // the live match label; PrepareSession rewrites it
 	signals int         // MatchSignal calls received
+
+	// afterPrepareGroupIDs, when set, replaces the server\'s group_ids in the
+	// label the prepare signal returns: the guild list changing between reads.
+	afterPrepareGroupIDs []uuid.UUID
 }
 
 func (n *allocateRPCNakama) GroupsGetId(ctx context.Context, ids []string) ([]*api.Group, error) {
@@ -69,6 +76,9 @@ func (n *allocateRPCNakama) MatchSignal(ctx context.Context, id string, data str
 	}
 	gid := settings.GroupID
 	n.label.GroupID = &gid
+	if n.afterPrepareGroupIDs != nil {
+		n.label.GameServer.GroupIDs = n.afterPrepareGroupIDs
+	}
 	b, _ := json.Marshal(n.label)
 	resp, _ := json.Marshal(SignalResponse{Success: true, Payload: string(b)})
 	return string(resp), nil
@@ -244,5 +254,98 @@ func assertAllocateRefused(t *testing.T, nk *allocateRPCNakama, err error) {
 	}
 	if got := nk.currentGroupID(); got != uuid.Nil {
 		t.Fatalf("refused call left match group = %s, want unset", got)
+	}
+}
+
+// Once the match-ID branch has been checked and prepared it must not be checked
+// again: if the server's guild list changes (or a guild fails to load) between
+// the two reads, a second check would refuse a match that was already rewritten.
+func TestAllocateMatchRPC_MatchIDBranchNotRecheckedAfterPrepare(t *testing.T) {
+	nk := newAllocateRPCFixture(t, allocServerGuild, allocTargetGuild)
+	// After the prepare, the server reports a guild the caller is not allocator
+	// in and that cannot even be loaded.
+	nk.afterPrepareGroupIDs = []uuid.UUID{uuid.FromStringOrNil("ffffffff-0000-0000-0000-00000000000f")}
+	if _, err := AllocateMatchRPC(allocateCtx(allocCaller, nil), newCaptureLogger(), nil, nk, allocatePayload()); err != nil {
+		t.Fatalf("call refused after the match was already prepared: %v", err)
+	}
+	if nk.signals != 1 {
+		t.Fatalf("signals = %d, want 1", nk.signals)
+	}
+}
+
+// --- PrepareMatchRPC: the sibling RPC follows the same rule ---
+
+// guildLookupDriver answers every query with one row holding allocTargetGuild,
+// standing in for GetGroupIDByGuildID's lookup.
+type guildLookupDriver struct{}
+
+func (guildLookupDriver) Open(string) (driver.Conn, error) { return guildLookupConn{}, nil }
+
+type guildLookupConn struct{}
+
+func (guildLookupConn) Prepare(string) (driver.Stmt, error) { return guildLookupStmt{}, nil }
+func (guildLookupConn) Close() error                        { return nil }
+func (guildLookupConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
+type guildLookupStmt struct{}
+
+func (guildLookupStmt) Close() error                               { return nil }
+func (guildLookupStmt) NumInput() int                              { return -1 }
+func (guildLookupStmt) Exec([]driver.Value) (driver.Result, error) { return nil, driver.ErrSkip }
+func (guildLookupStmt) Query([]driver.Value) (driver.Rows, error)  { return &guildLookupRows{}, nil }
+
+type guildLookupRows struct{ done bool }
+
+func (r *guildLookupRows) Columns() []string { return []string{"id"} }
+func (r *guildLookupRows) Close() error      { return nil }
+func (r *guildLookupRows) Next(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+	r.done = true
+	dest[0] = allocTargetGuild
+	return nil
+}
+
+var registerGuildLookupDriver sync.Once
+
+func guildLookupDB(t *testing.T) *sql.DB {
+	t.Helper()
+	registerGuildLookupDriver.Do(func() { sql.Register("guild-lookup", guildLookupDriver{}) })
+	db, err := sql.Open("guild-lookup", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func preparePayload() string {
+	b, _ := json.Marshal(map[string]any{
+		"id":       allocMatchID + ".node",
+		"guild_id": "123456789",
+		"mode":     "echo_arena",
+	})
+	return string(b)
+}
+
+func TestPrepareMatchRPC_AllocatorInBothGuilds_Allowed(t *testing.T) {
+	nk := newAllocateRPCFixture(t, allocServerGuild, allocTargetGuild)
+	if _, err := PrepareMatchRPC(allocateCtx(allocCaller, nil), newCaptureLogger(), guildLookupDB(t), nk, preparePayload()); err != nil {
+		t.Fatalf("allocator in both guilds was refused: %v", err)
+	}
+	if got := nk.currentGroupID(); got != uuid.FromStringOrNil(allocTargetGuild) {
+		t.Fatalf("match group = %s, want target %s", got, allocTargetGuild)
+	}
+}
+
+func TestPrepareMatchRPC_AllocatorOnlyInTarget_RefusedAndMatchUntouched(t *testing.T) {
+	nk := newAllocateRPCFixture(t, allocTargetGuild)
+	before, _ := json.Marshal(nk.label)
+	_, err := PrepareMatchRPC(allocateCtx(allocCaller, nil), newCaptureLogger(), guildLookupDB(t), nk, preparePayload())
+	assertAllocateRefused(t, nk, err)
+	after, _ := json.Marshal(nk.label)
+	if string(before) != string(after) {
+		t.Fatalf("match label changed by a refused call:\nbefore %s\nafter  %s", before, after)
 	}
 }
