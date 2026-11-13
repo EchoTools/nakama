@@ -52,7 +52,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 					Title: "Party has been empty for more than 2 minutes.",
 				}},
 			}); err != nil {
-				logger.Error("Failed to edit interaction response", zap.Error(err))
+				LogError(logger, "Failed to edit interaction response", zap.Error(err))
 			}
 		}()
 
@@ -99,7 +99,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 			// List the party members.
 			members, err = nk.StreamUserList(StreamModeParty, partyStr, "", d.pipeline.node, false, true)
 			if err != nil {
-				logger.Error("Failed to list stream users", zap.Error(err))
+				LogError(logger, "Failed to list stream users", zap.Error(err))
 				return
 			}
 
@@ -122,7 +122,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 			// List who is matchmaking
 			currentlyMatchmaking, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", false, true)
 			if err != nil {
-				logger.Error("Failed to list stream users", zap.Error(err))
+				LogError(logger, "Failed to list stream users", zap.Error(err))
 				return
 			}
 
@@ -133,7 +133,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 
 					// Unmarshal the user status
 					if err := json.Unmarshal([]byte(p.GetStatus()), matchmakingStates[p.GetUserId()]); err != nil {
-						logger.Error("Failed to unmarshal user status", zap.Error(err))
+						LogError(logger, "Failed to unmarshal user status", zap.Error(err))
 						continue
 					}
 
@@ -151,7 +151,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 
 					if member, ok = memberCache[discordIDs[j]]; !ok {
 						if member, err = d.cache.GuildMember(i.GuildID, discordIDs[j]); err != nil {
-							logger.Error("Failed to get guild member", zap.Error(err))
+							LogError(logger, "Failed to get guild member", zap.Error(err))
 							embeds[j].Title = "*Unknown User*"
 							continue
 						} else if member != nil {
@@ -195,7 +195,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 						Embeds: embeds,
 					},
 				}); err != nil {
-					logger.Error("Failed to send interaction response", zap.Error(err))
+					LogError(logger, "Failed to send interaction response", zap.Error(err))
 					return
 				}
 				responded = true
@@ -214,7 +214,7 @@ func (d *DiscordAppBot) handlePartyStatus(ctx context.Context, logger runtime.Lo
 				Content: ptr.String("Party Status"),
 				Embeds:  &embeds,
 			}); err != nil {
-				logger.Error("Failed to edit interaction response", zap.Error(err))
+				LogError(logger, "Failed to edit interaction response", zap.Error(err))
 				return
 			}
 

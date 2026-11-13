@@ -80,7 +80,7 @@ func (h *DiscordLinkedRolesHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	// Get Discord user info from the access token
 	discordUserID, err := h.getDiscordUserIDFromToken(accessToken)
 	if err != nil {
-		h.logger.Error("Failed to get Discord user ID from token", zap.Error(err))
+		LogError(h.logger, "Failed to get Discord user ID from token", zap.Error(err))
 		http.Error(w, "Invalid access token", http.StatusUnauthorized)
 		return
 	}
@@ -88,7 +88,7 @@ func (h *DiscordLinkedRolesHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	// Find the corresponding Nakama user ID
 	userID, err := GetUserIDByDiscordID(h.ctx, h.db, discordUserID)
 	if err != nil {
-		h.logger.Error("Failed to find user by Discord ID", zap.String("discord_id", discordUserID), zap.Error(err))
+		LogError(h.logger, "Failed to find user by Discord ID", zap.String("discord_id", discordUserID), zap.Error(err))
 		// Return empty metadata for users not found in our system
 		metadata := DiscordLinkedRolesMetadata{
 			PlatformName:  "Echo VR",
@@ -102,7 +102,7 @@ func (h *DiscordLinkedRolesHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	// Get user metadata
 	metadata, err := h.getUserMetadata(userID)
 	if err != nil {
-		h.logger.Error("Failed to get user metadata", zap.String("user_id", userID), zap.Error(err))
+		LogError(h.logger, "Failed to get user metadata", zap.String("user_id", userID), zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -153,7 +153,7 @@ func (h *DiscordLinkedRolesHandler) getUserMetadata(userID string) (DiscordLinke
 	profile, err := EVRProfileLoad(h.ctx, h.nk, userID)
 	if err != nil {
 		// If profile doesn't exist, user hasn't linked a headset
-		h.logger.Debug("Failed to load EVR profile for user", zap.String("user_id", userID), zap.Error(err))
+		LogDebug(h.logger, "Failed to load EVR profile for user", zap.String("user_id", userID), zap.Error(err))
 		metadata.HasHeadset = false
 	} else {
 		metadata.HasHeadset = profile.IsLinked()
@@ -168,7 +168,7 @@ func (h *DiscordLinkedRolesHandler) getUserMetadata(userID string) (DiscordLinke
 	// Check if the user has played Echo (using existing HasLoggedIntoEcho function)
 	hasPlayed, err := HasLoggedIntoEcho(h.ctx, h.nk, userID)
 	if err != nil {
-		h.logger.Debug("Failed to check if user has played Echo", zap.String("user_id", userID), zap.Error(err))
+		LogDebug(h.logger, "Failed to check if user has played Echo", zap.String("user_id", userID), zap.Error(err))
 		metadata.HasPlayedEcho = false
 	} else {
 		metadata.HasPlayedEcho = hasPlayed
@@ -182,7 +182,7 @@ func (h *DiscordLinkedRolesHandler) sendJSONResponse(w http.ResponseWriter, data
 	w.Header().Set("Content-Type", "application/json")
 
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		h.logger.Error("Failed to encode JSON response", zap.Error(err))
+		LogError(h.logger, "Failed to encode JSON response", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 }

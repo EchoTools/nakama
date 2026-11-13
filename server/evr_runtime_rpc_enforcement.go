@@ -77,7 +77,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	// Check permissions (global operator, global bot, or guild enforcer)
 	isGlobalOperator, isGlobalBot, _, gg, err := RequireEnforcerOperatorOrBot(ctx, db, nk, userID, groupID)
 	if err != nil {
-		logger.Error("Permission check failed", zap.Error(err))
+		LogError(logger, "Permission check failed", zap.Error(err))
 		return "", err
 	}
 
@@ -121,7 +121,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	// Get the user's active presences
 	presences, err := nk.StreamUserList(StreamModeService, targetUserID, "", StreamLabelMatchService, false, true)
 	if err != nil {
-		logger.Error("Failed to list user streams", zap.Error(err))
+		LogError(logger, "Failed to list user streams", zap.Error(err))
 		return "", runtime.NewError("Failed to get user sessions", StatusInternalError)
 	}
 
@@ -143,7 +143,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	// Load or create enforcement journal
 	journal := NewGuildEnforcementJournal(targetUserID)
 	if err := StorableRead(ctx, nk, targetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
-		logger.Error("Failed to read enforcement journal", zap.Error(err))
+		LogError(logger, "Failed to read enforcement journal", zap.Error(err))
 		return "", runtime.NewError("Failed to read enforcement journal", StatusInternalError)
 	}
 
@@ -153,7 +153,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		enforcerDiscordID := ""
 		account, err := nk.AccountGetId(ctx, enforcerUserID)
 		if err != nil {
-			logger.Error("Failed to load enforcer account for Discord ID", zap.Error(err), zap.String("enforcer_user_id", enforcerUserID))
+			LogError(logger, "Failed to load enforcer account for Discord ID", zap.Error(err), zap.String("enforcer_user_id", enforcerUserID))
 		} else if account != nil && account.CustomId != "" {
 			enforcerDiscordID = account.CustomId
 		}
@@ -164,7 +164,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		if request.ReporterUserID != "" {
 			reporterAccount, rErr := nk.AccountGetId(ctx, request.ReporterUserID)
 			if rErr != nil {
-				logger.Warn("Failed to load reporter account for Discord ID", zap.Error(rErr), zap.String("reporter_user_id", request.ReporterUserID))
+				LogWarn(logger, "Failed to load reporter account for Discord ID", zap.Error(rErr), zap.String("reporter_user_id", request.ReporterUserID))
 			} else if reporterAccount != nil && reporterAccount.CustomId != "" {
 				reporterDiscordID = reporterAccount.CustomId
 			}
@@ -211,7 +211,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	// Save the enforcement journal and sync to profile with retry logic for concurrent writes
 	if err := SyncJournalAndProfileWithRetry(ctx, nk, targetUserID, journal); err != nil {
-		logger.Error("Failed to write enforcement data", zap.Error(err))
+		LogError(logger, "Failed to write enforcement data", zap.Error(err))
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
@@ -247,7 +247,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 	responseData, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response", zap.Error(err))
+		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 
@@ -296,7 +296,7 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 		if isPermissionDenied && isOwner {
 			// Owner bypass: guild owner can view enforcement journals even without enforcer role
 		} else {
-			logger.Error("Permission check failed", zap.Error(err))
+			LogError(logger, "Permission check failed", zap.Error(err))
 			return "", err
 		}
 	}
@@ -317,14 +317,14 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 		// as we are manually checking permissions above.
 		objs, nextCursor, err := nk.StorageIndexList(ctx, SystemUserID, StorageIndexEnforcementJournal, query, 100, nil, cursor)
 		if err != nil {
-			logger.Error("Failed to list enforcement journals", zap.Error(err))
+			LogError(logger, "Failed to list enforcement journals", zap.Error(err))
 			return "", runtime.NewError("Failed to list enforcement journals", StatusInternalError)
 		}
 
 		for _, obj := range objs.Objects {
 			journal, err := GuildEnforcementJournalFromStorageObject(obj)
 			if err != nil {
-				logger.Warn("Failed to unmarshal enforcement journal", zap.Error(err), zap.String("user_id", obj.GetUserId()))
+				LogWarn(logger, "Failed to unmarshal enforcement journal", zap.Error(err), zap.String("user_id", obj.GetUserId()))
 				continue
 			}
 
@@ -395,7 +395,7 @@ func EnforcementJournalListRPC(ctx context.Context, logger runtime.Logger, db *s
 
 	responseData, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response", zap.Error(err))
+		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 
@@ -447,14 +447,14 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	// Check permissions (global operator or guild enforcer)
 	isOperator, _, gg, err := RequireEnforcerOrOperator(ctx, db, nk, userID, request.GroupID)
 	if err != nil {
-		logger.Error("Permission check failed", zap.Error(err))
+		LogError(logger, "Permission check failed", zap.Error(err))
 		return "", err
 	}
 
 	// Load the enforcement journal
 	journal := NewGuildEnforcementJournal(request.TargetUserID)
 	if err := StorableRead(ctx, nk, request.TargetUserID, journal, false); err != nil && status.Code(err) != codes.NotFound {
-		logger.Error("Failed to read enforcement journal", zap.Error(err))
+		LogError(logger, "Failed to read enforcement journal", zap.Error(err))
 		return "", runtime.NewError("Failed to read enforcement journal", StatusInternalError)
 	}
 
@@ -510,7 +510,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	callerDiscordID := ""
 	account, err := nk.AccountGetId(ctx, userID)
 	if err != nil {
-		logger.Error("Failed to load caller account for Discord ID", zap.Error(err), zap.String("user_id", userID))
+		LogError(logger, "Failed to load caller account for Discord ID", zap.Error(err), zap.String("user_id", userID))
 	} else if account != nil && account.CustomId != "" {
 		callerDiscordID = account.CustomId
 	}
@@ -523,12 +523,12 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 
 	// Save the journal and sync to profile with retry logic for concurrent writes
 	if err := SyncJournalAndProfileWithRetry(ctx, nk, request.TargetUserID, journal); err != nil {
-		logger.Error("Failed to write enforcement data", zap.Error(err))
+		LogError(logger, "Failed to write enforcement data", zap.Error(err))
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
 	// Log the edit
-	logger.Info("Enforcement record edited via portal",
+	LogInfo(logger, "Enforcement record edited via portal",
 		zap.String("group_id", request.GroupID),
 		zap.String("target_user_id", request.TargetUserID),
 		zap.String("record_id", request.RecordID),
@@ -566,7 +566,7 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 
 	responseData, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response", zap.Error(err))
+		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 

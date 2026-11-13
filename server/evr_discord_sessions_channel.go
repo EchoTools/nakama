@@ -90,7 +90,7 @@ func (sm *SessionsChannelManager) loadTrackedMessages() {
 		},
 	})
 	if err != nil {
-		sm.logger.Error("Failed to load session message trackers from storage", zap.Error(err))
+		LogError(sm.logger, "Failed to load session message trackers from storage", zap.Error(err))
 		return
 	}
 
@@ -100,7 +100,7 @@ func (sm *SessionsChannelManager) loadTrackedMessages() {
 
 	var trackers map[string]*SessionMessageTracker
 	if err := json.Unmarshal([]byte(storageObjects[0].Value), &trackers); err != nil {
-		sm.logger.Error("Failed to unmarshal session message trackers", zap.Error(err))
+		LogError(sm.logger, "Failed to unmarshal session message trackers", zap.Error(err))
 		return
 	}
 
@@ -108,7 +108,7 @@ func (sm *SessionsChannelManager) loadTrackedMessages() {
 	defer sm.Unlock()
 	sm.activeMessages = trackers
 
-	sm.logger.Info("Loaded session message trackers", zap.Int("count", len(trackers)))
+	LogInfo(sm.logger, "Loaded session message trackers", zap.Int("count", len(trackers)))
 }
 
 // saveTrackedMessages saves session message trackers to Redis
@@ -122,7 +122,7 @@ func (sm *SessionsChannelManager) saveTrackedMessages() {
 
 	data, err := json.Marshal(trackers)
 	if err != nil {
-		sm.logger.Error("Failed to marshal session message trackers", zap.Error(err))
+		LogError(sm.logger, "Failed to marshal session message trackers", zap.Error(err))
 		return
 	}
 
@@ -136,7 +136,7 @@ func (sm *SessionsChannelManager) saveTrackedMessages() {
 		},
 	})
 	if err != nil {
-		sm.logger.Error("Failed to save session message trackers to storage", zap.Error(err))
+		LogError(sm.logger, "Failed to save session message trackers to storage", zap.Error(err))
 	}
 }
 
@@ -154,7 +154,7 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 			Components: components,
 		})
 		if err != nil {
-			sm.logger.Error("Failed to send session message to guild channel",
+			LogError(sm.logger, "Failed to send session message to guild channel",
 				zap.String("channel_id", guildGroup.SessionsChannelID),
 				zap.Error(err))
 		} else {
@@ -183,7 +183,7 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 			Components: components,
 		})
 		if err != nil {
-			sm.logger.Error("Failed to send session message to service channel",
+			LogError(sm.logger, "Failed to send session message to service channel",
 				zap.String("channel_id", serviceChannelID),
 				zap.Error(err))
 		} else {
@@ -213,7 +213,7 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 	// Save to storage
 	sm.saveTrackedMessages()
 
-	sm.logger.Info("Posted session messages",
+	LogInfo(sm.logger, "Posted session messages",
 		zap.String("session_id", label.ID.String()),
 		zap.Strings("messages", postedMessages))
 
@@ -411,7 +411,7 @@ func (sm *SessionsChannelManager) updateSessionMessages() {
 
 	for _, tracker := range trackers {
 		if err := sm.updateSessionMessage(tracker); err != nil {
-			sm.logger.Error("Failed to update session message",
+			LogError(sm.logger, "Failed to update session message",
 				zap.String("session_id", tracker.SessionID),
 				zap.String("message_id", tracker.MessageID),
 				zap.Error(err))
@@ -510,7 +510,7 @@ func (sm *SessionsChannelManager) RemoveSessionMessage(sessionID string) {
 	if len(removedTrackers) > 0 {
 		sm.saveTrackedMessages()
 
-		sm.logger.Info("Removed session messages from tracking",
+		LogInfo(sm.logger, "Removed session messages from tracking",
 			zap.String("session_id", sessionID),
 			zap.Strings("removed", removedTrackers))
 	}

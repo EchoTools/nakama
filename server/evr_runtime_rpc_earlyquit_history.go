@@ -66,7 +66,7 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		// Check if caller is a global operator
 		isGlobalOperator, err := CheckSystemGroupMembership(ctx, db, callerUserID, GroupGlobalOperators)
 		if err != nil {
-			logger.Error("Failed to check global operator status", zap.Error(err))
+			LogError(logger, "Failed to check global operator status", zap.Error(err))
 			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 		}
 		if !isGlobalOperator {
@@ -77,13 +77,13 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Load early quit config for summary stats
 	eqconfig := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, nk, targetUserID, eqconfig, false); err != nil {
-		logger.Debug("Failed to load early quit config, using defaults", zap.Error(err))
+		LogDebug(logger, "Failed to load early quit config, using defaults", zap.Error(err))
 	}
 
 	// Load detailed quit history
 	history := NewEarlyQuitHistory(targetUserID)
 	if err := StorableRead(ctx, nk, targetUserID, history, false); err != nil {
-		logger.Debug("No early quit history found, returning empty", zap.Error(err))
+		LogDebug(logger, "No early quit history found, returning empty", zap.Error(err))
 		// Return empty history rather than error
 		history = NewEarlyQuitHistory(targetUserID)
 	}
@@ -160,7 +160,7 @@ func EarlyQuitHistoryRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	responseData, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response", zap.Error(err))
+		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 

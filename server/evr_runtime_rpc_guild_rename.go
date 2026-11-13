@@ -72,7 +72,7 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	} else {
 		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
 		if err != nil {
-			logger.Error("Failed to check operator status", zap.Error(err))
+			LogError(logger, "Failed to check operator status", zap.Error(err))
 			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 		}
 	}
@@ -81,7 +81,7 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 		// Check if the caller is an enforcer in the target guild
 		gg, err := GuildGroupLoad(ctx, nk, groupID)
 		if err != nil {
-			logger.Error("Failed to load guild group", zap.Error(err))
+			LogError(logger, "Failed to load guild group", zap.Error(err))
 			return "", runtime.NewError("Failed to load guild group", StatusInternalError)
 		}
 		if !gg.IsEnforcer(callerID) {
@@ -98,7 +98,7 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Load the target user's EVR profile
 	evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
 	if err != nil {
-		logger.Error("Failed to load EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
+		LogError(logger, "Failed to load EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
 		return "", runtime.NewError("Failed to load player profile", StatusInternalError)
 	}
 	if evrProfile == nil {
@@ -139,14 +139,14 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// them happened to commit first.
 	updated, err := evrProfileUpdateWithRetry(ctx, nk, targetUserID, evrProfile, setIGN)
 	if err != nil {
-		logger.Error("Failed to update EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
+		LogError(logger, "Failed to update EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
 		return "", runtime.NewError("Failed to update player profile", StatusInternalError)
 	}
 	evrProfile = updated
 
 	// Record the change in display name history
 	if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, groupID, sanitizedName, evrProfile.Username(), false); err != nil {
-		logger.Error("Failed to update display name history", zap.Error(err), zap.String("user_id", targetUserID))
+		LogError(logger, "Failed to update display name history", zap.Error(err), zap.String("user_id", targetUserID))
 		// Non-fatal: continue with success response
 	}
 
@@ -174,15 +174,15 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	gg, err := GuildGroupLoad(ctx, nk, groupID)
 	if err == nil && gg != nil {
 		if _, err := AuditLogSendGuild(dg, gg, auditMsg); err != nil {
-			logger.Warn("Failed to send guild audit log", zap.Error(err))
+			LogWarn(logger, "Failed to send guild audit log", zap.Error(err))
 		}
 	} else if ss := ServiceSettings(); ss != nil {
 		if err := AuditLogSend(dg, ss.ServiceAuditChannelID, auditMsg); err != nil {
-			logger.Warn("Failed to send audit log", zap.Error(err))
+			LogWarn(logger, "Failed to send audit log", zap.Error(err))
 		}
 	}
 
-	logger.Info("Guild player rename completed",
+	LogInfo(logger, "Guild player rename completed",
 		zap.String("caller_id", callerID),
 		zap.String("target_user_id", targetUserID),
 		zap.String("group_id", groupID),
@@ -200,7 +200,7 @@ func GuildPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response", zap.Error(err))
+		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 
@@ -255,7 +255,7 @@ func GuildPlayerIGNRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	} else {
 		isGlobalOperator, err = CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
 		if err != nil {
-			logger.Error("Failed to check operator status", zap.Error(err))
+			LogError(logger, "Failed to check operator status", zap.Error(err))
 			return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 		}
 	}
@@ -264,7 +264,7 @@ func GuildPlayerIGNRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 		// Get the target user's guild memberships and check if caller is enforcer in any
 		userGroups, _, err := nk.UserGroupsList(ctx, targetUserID, 100, nil, "")
 		if err != nil {
-			logger.Error("Failed to list user groups", zap.Error(err))
+			LogError(logger, "Failed to list user groups", zap.Error(err))
 			return "", runtime.NewError("Failed to check guild memberships", StatusInternalError)
 		}
 
@@ -303,7 +303,7 @@ func GuildPlayerIGNRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	// Load the target user's EVR profile
 	evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID)
 	if err != nil {
-		logger.Error("Failed to load EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
+		LogError(logger, "Failed to load EVR profile", zap.Error(err), zap.String("user_id", targetUserID))
 		return "", runtime.NewError("Failed to load player profile", StatusInternalError)
 	}
 	if evrProfile == nil {
@@ -324,7 +324,7 @@ func GuildPlayerIGNRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		logger.Error("Failed to marshal response", zap.Error(err))
+		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 

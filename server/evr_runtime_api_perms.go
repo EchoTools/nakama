@@ -25,7 +25,7 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 
 	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
-		logger.Error("Failed to parse session variables from context", zap.Error(err))
+		LogError(logger, "Failed to parse session variables from context", zap.Error(err))
 		return err
 	}
 
@@ -70,7 +70,7 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 			// retry as the system user
 			objs, err := nk.StorageRead(ctx, ops)
 			if err != nil {
-				logger.Error("Failed to read storage objects as system user", zap.Error(err))
+				LogError(logger, "Failed to read storage objects as system user", zap.Error(err))
 				return err
 			}
 			for _, obj := range objs {
@@ -96,7 +96,7 @@ func AfterReadStorageObjectsHook(ctx context.Context, logger runtime.Logger, db 
 func checkStorageObjectAuthorization(ctx context.Context, logger runtime.Logger) (bool, error) {
 	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
-		logger.Error("Failed to parse session variables from context", zap.Error(err))
+		LogError(logger, "Failed to parse session variables from context", zap.Error(err))
 		return false, err
 	}
 
@@ -178,7 +178,7 @@ func BeforeListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.D
 
 	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
-		logger.Error("Failed to parse session variables from context", zap.Error(err))
+		LogError(logger, "Failed to parse session variables from context", zap.Error(err))
 		return nil, err
 	}
 
@@ -385,7 +385,7 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Get session vars for permission checks
 	vars, err := intents.SessionVarsFromRuntimeContext(ctx)
 	if err != nil {
-		logger.Error("Failed to parse session variables", zap.Error(err))
+		LogError(logger, "Failed to parse session variables", zap.Error(err))
 		return err
 	}
 
@@ -394,7 +394,7 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Fetch user's guild memberships and roles
 	userGroups, _, err := nk.UserGroupsList(ctx, userID, 100, nil, "")
 	if err != nil {
-		logger.Error("Failed to fetch user groups", zap.Error(err))
+		LogError(logger, "Failed to fetch user groups", zap.Error(err))
 		return err
 	}
 
@@ -428,7 +428,7 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 	if len(groupIDs) > 0 {
 		ggs, err := GuildGroupsLoad(ctx, nk, groupIDs)
 		if err != nil {
-			logger.Warn("Failed to load guild groups", zap.Error(err))
+			LogWarn(logger, "Failed to load guild groups", zap.Error(err))
 		} else {
 			for _, gg := range ggs {
 				guildGroups[gg.ID().String()] = gg

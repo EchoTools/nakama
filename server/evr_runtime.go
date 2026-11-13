@@ -94,7 +94,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		return fmt.Errorf("DISCORD_BOT_TOKEN is required but not set")
 	} else {
 		if dg, err = discordgo.New("Bot " + appBotToken); err != nil {
-			logger.Error("Unable to create bot", zap.Error(err))
+			LogError(logger, "Unable to create bot", zap.Error(err))
 			return fmt.Errorf("unable to create discord bot: %w", err)
 		}
 		dg.StateEnabled = true
@@ -120,7 +120,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	if db != nil && nk != nil { // Avoid panic's during some automated tests
 		go func() {
 			if err := RegisterIndexes(initializer); err != nil {
-				logger.Error("Failed to register indexes", zap.Error(err))
+				LogError(logger, "Failed to register indexes", zap.Error(err))
 			}
 		}()
 
@@ -199,7 +199,7 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	var mongoClient *mongo.Client
 	if mongoURI := vars["MONGODB_URI"]; mongoURI != "" {
 		if mongoClient, err = connectMongoDB(ctx, mongoURI); err != nil {
-			logger.Warn("Failed to connect to MongoDB, match summarization will not be available", zap.Error(err))
+			LogWarn(logger, "Failed to connect to MongoDB, match summarization will not be available", zap.Error(err))
 		}
 	} else {
 		logger.Info("MongoDB URI not configured, match summarization will not be available")
@@ -209,11 +209,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 		globalMongoClient.Store(mongoClient)
 
 		if err := EnsureGuildAuditLogIndexes(ctx, mongoClient); err != nil {
-			logger.Warn("Failed to create guild audit log indexes", zap.Error(err))
+			LogWarn(logger, "Failed to create guild audit log indexes", zap.Error(err))
 		}
 
 		if err := EnsurePlayerMatchResultIndexes(ctx, mongoClient); err != nil {
-			logger.Warn("Failed to create player match result indexes", zap.Error(err))
+			LogWarn(logger, "Failed to create player match result indexes", zap.Error(err))
 		}
 
 		if err := RegisterSessionEventRPCs(ctx, logger, db, nk, initializer, mongoClient); err != nil {
@@ -226,11 +226,11 @@ func InitializeEvrRuntimeModule(ctx context.Context, logger runtime.Logger, db *
 	var journalRedisClient *redis.Client
 	if vars["JOURNAL_REDIS_URI"] != "" {
 		if journalRedisClient, err = connectRedis(ctx, vars["JOURNAL_REDIS_URI"]); err != nil {
-			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
+			LogWarn(logger, "Failed to connect to Redis for event journaling", zap.Error(err))
 		}
 	} else if vars["VRML_REDIS_URI"] != "" {
 		if journalRedisClient, err = connectRedis(ctx, vars["VRML_REDIS_URI"]); err != nil {
-			logger.Warn("Failed to connect to Redis for event journaling", zap.Error(err))
+			LogWarn(logger, "Failed to connect to Redis for event journaling", zap.Error(err))
 		}
 	}
 

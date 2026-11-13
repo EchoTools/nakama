@@ -18,14 +18,19 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 
 	nkruntime "github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type RuntimeGoLogger struct {
 	logger *zap.Logger
 	fields map[string]interface{}
+
+	skipOnce   sync.Once
+	skipLogger *zap.Logger // logger with one more frame of caller skip; see logFromHelper
 }
 
 func NewRuntimeGoLogger(logger *zap.Logger) nkruntime.Logger {
@@ -36,7 +41,13 @@ func NewRuntimeGoLogger(logger *zap.Logger) nkruntime.Logger {
 }
 
 func (l *RuntimeGoLogger) getFileLine() zap.Field {
-	_, filename, line, ok := runtime.Caller(2)
+	return l.getFileLineSkip(0)
+}
+
+// getFileLineSkip is getFileLine for a caller that sits extra frames above the
+// logging method (the Log* helpers in evr_logger_fields.go).
+func (l *RuntimeGoLogger) getFileLineSkip(extra int) zap.Field {
+	_, filename, line, ok := runtime.Caller(2 + extra)
 	if !ok {
 		return zap.Skip()
 	}
@@ -45,6 +56,52 @@ func (l *RuntimeGoLogger) getFileLine() zap.Field {
 		filename = filenameSplit[1]
 	}
 	return zap.String("source", fmt.Sprintf("%v:%v", filename, line))
+}
+
+// logFromHelper logs msg verbatim at level with fields attached, for the Log*
+// helpers in evr_logger_fields.go, which sit one frame above the call site that
+// should be reported: both zap's caller and the "source" field then name the
+// helper's caller. The caller-skipped zap logger is built once per
+// RuntimeGoLogger rather than on every call, and fields ride on the log call
+// itself, so nothing is cloned per call.
+func (l *RuntimeGoLogger) logFromHelper(level zapcore.Level, msg string, fields []zap.Field) {
+	if !l.logger.Core().Enabled(level) {
+		return
+	}
+	l.skipOnce.Do(func() { l.skipLogger = l.logger.WithOptions(zap.AddCallerSkip(1)) })
+	// WithFields drops a caller-supplied "runtime" key so nothing can override or
+	// duplicate the base runtime=go field; fields passed here bypass WithFields,
+	// so the same rule is applied here. Copy only when there is something to drop
+	// or a source field to add.
+	drop := false
+	for _, f := range fields {
+		if f.Key == "runtime" {
+			drop = true
+			break
+		}
+	}
+	if drop || level >= zapcore.WarnLevel {
+		all := make([]zap.Field, 0, len(fields)+1)
+		for _, f := range fields {
+			if f.Key != "runtime" {
+				all = append(all, f)
+			}
+		}
+		if level >= zapcore.WarnLevel {
+			all = append(all, l.getFileLineSkip(1))
+		}
+		fields = all
+	}
+	switch level {
+	case zapcore.DebugLevel:
+		l.skipLogger.Debug(msg, fields...)
+	case zapcore.InfoLevel:
+		l.skipLogger.Info(msg, fields...)
+	case zapcore.WarnLevel:
+		l.skipLogger.Warn(msg, fields...)
+	default:
+		l.skipLogger.Error(msg, fields...)
+	}
 }
 
 func (l *RuntimeGoLogger) Debug(format string, v ...interface{}) {

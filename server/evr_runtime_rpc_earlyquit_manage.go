@@ -72,13 +72,13 @@ func EarlyQuitViewRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	// Load player state
 	state := NewEarlyQuitPlayerState()
 	if err := StorableRead(ctx, nk, request.TargetUserID, state, false); err != nil {
-		logger.Debug("No early quit state found", zap.Error(err))
+		LogDebug(logger, "No early quit state found", zap.Error(err))
 	}
 
 	// Load history for guild stats
 	history := NewEarlyQuitHistory(request.TargetUserID)
 	if err := StorableRead(ctx, nk, request.TargetUserID, history, false); err != nil {
-		logger.Debug("No early quit history found", zap.Error(err))
+		LogDebug(logger, "No early quit history found", zap.Error(err))
 		history = NewEarlyQuitHistory(request.TargetUserID)
 	}
 
