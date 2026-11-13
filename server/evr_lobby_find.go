@@ -159,6 +159,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 				p.cancelTicketForLateArrival(ctx, logger, session, lobbyParams, lobbyGroup)
 			}
 
+			followStarted := time.Now()
+			lobbyParams.followRelease = nil
 			if p.TryFollowPartyLeader(ctx, logger, session, lobbyParams, lobbyGroup) {
 				return nil
 			}
@@ -222,7 +224,8 @@ func (p *EvrPipeline) lobbyFind(ctx context.Context, logger *zap.Logger, session
 					}
 					// Non-social mode: release the follower to independent matchmaking.
 					logger.Info("Follower cannot join leader's match, releasing to independent matchmaking",
-						zap.String("mode", lobbyParams.Mode.String()))
+						append([]zap.Field{zap.String("mode", lobbyParams.Mode.String())},
+							lobbyParams.followReleaseFields(time.Since(followStarted))...)...)
 
 					// Observer: released from follow path, regrouping.
 					if lc := getMatchLifecycle(session); lc != nil {
@@ -1545,6 +1548,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	leader := lobbyGroup.GetLeader()
 	if leader == nil {
 		logger.Warn("Party leader not found, falling through to normal find")
+		params.noteFollowRelease(followReleaseNoLeader, MatchID{}, nil, 0)
 		return false
 	}
 
@@ -1564,6 +1568,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if leader.UserId == session.userID.String() {
 		logger.Debug("Party leader is this player's own (different) session, not self-following",
 			zap.String("leader_sid", leader.SessionId))
+		params.noteFollowRelease(followReleaseLeaderOwnSession, MatchID{}, nil, 0)
 		return false
 	}
 
@@ -1578,6 +1583,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	// bug in parties of 3+.
 	if pr := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, params.MatchmakingStream(), leaderUserID); pr != nil {
 		logger.Debug("Leader is currently matchmaking, falling through")
+		params.noteFollowRelease(followReleaseLeaderMatchmaking, MatchID{}, nil, 0)
 		return false
 	}
 
@@ -1590,12 +1596,14 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	presence := session.pipeline.tracker.GetLocalBySessionIDStreamUserID(leaderSessionID, stream, leaderUserID)
 	if presence == nil {
 		logger.Debug("Leader is not in a match, falling through to normal find")
+		params.noteFollowRelease(followReleaseLeaderNoMatch, MatchID{}, nil, 0)
 		return false
 	}
 
 	leaderMatchID := MatchIDFromStringOrNil(presence.GetStatus())
 	if leaderMatchID.IsNil() {
 		logger.Debug("Leader has no match ID, falling through to normal find")
+		params.noteFollowRelease(followReleaseLeaderNoMatch, MatchID{}, nil, 0)
 		return false
 	}
 
@@ -1633,10 +1641,12 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	label, err := MatchLabelByID(ctx, p.nk, leaderMatchID)
 	if err != nil {
 		logger.Warn("Failed to get leader's match label", zap.Error(err))
+		params.noteFollowRelease(followReleaseLeaderMatchUnread, leaderMatchID, nil, 0)
 		return false
 	}
 	if label == nil {
 		logger.Debug("Leader's match not found")
+		params.noteFollowRelease(followReleaseLeaderMatchUnread, leaderMatchID, nil, 0)
 		return false
 	}
 
@@ -1693,6 +1703,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if !label.IsSocial() {
 		logger.Info("Leader is in a non-social match, follow path not applicable",
 			zap.String("leader_match_mode", label.Mode.String()))
+		params.noteFollowRelease(followReleaseNonSocialMatch, leaderMatchID, label, requiredSlots)
 		return false
 	}
 	// ModeSocialPrivate is excluded: private lobbies require explicit invitation.
@@ -1700,6 +1711,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if label.Mode != evr.ModeSocialPublic {
 		logger.Debug("Leader is in a non-joinable mode for party follow",
 			zap.String("mode", label.Mode.String()))
+		params.noteFollowRelease(followReleaseNonPublicSocialMatch, leaderMatchID, label, requiredSlots)
 		return false
 	}
 
@@ -1709,6 +1721,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 		SessionID: session.id,
 		UserID:    session.userID,
 	}); err != nil {
+		params.noteFollowRelease(followReleaseCapacityRefused, leaderMatchID, label, requiredSlots)
 		if params.CurrentMatchID.IsNil() {
 			return false
 		}
@@ -1720,6 +1733,7 @@ func (p *EvrPipeline) TryFollowPartyLeader(ctx context.Context, logger *zap.Logg
 	if err := p.lobbyJoin(ctx, logger, session, params, leaderMatchID); err != nil {
 		code := LobbyErrorCode(err)
 		logger.Debug("Failed to join leader's lobby", zap.Error(err), zap.Int("code", int(code)))
+		params.noteFollowRelease(followReleaseJoinFailed, leaderMatchID, label, requiredSlots)
 
 		if params.CurrentMatchID.IsNil() {
 			// Follower is at main menu; fall through to normal find.
@@ -1803,6 +1817,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		leader.UserId == session.userID.String() &&
 		leader.SessionId != session.id.String() {
 		logger.Debug("Party leader is this player's own session, not self-following in poll")
+		params.noteFollowRelease(followReleaseLeaderOwnSession, MatchID{}, nil, 0)
 		return false
 	}
 
@@ -1907,6 +1922,13 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 	}
 	pollDeadline := time.Now().Add(maxPollDuration)
 
+	// What the poll last saw of the leader's match, for the budget-exhausted record.
+	var (
+		lastLeaderMatchID MatchID
+		lastLabel         *MatchLabel
+		lastRequired      int
+	)
+
 	// pollWait sleeps for one poll interval, bounded by the time remaining in
 	// the overall budget so the total wait can never overshoot maxPollDuration
 	// by a full interval. It reports done=true when the caller should stop
@@ -1917,6 +1939,9 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		remaining := time.Until(pollDeadline)
 		if remaining <= 0 {
 			logger.Debug("Poll budget exhausted; leader did not become joinable, releasing to independent matchmaking")
+			if params.followRelease == nil || params.followRelease.Reason != followReleasePollBudgetExhausted {
+				params.noteFollowRelease(followReleasePollBudgetExhausted, lastLeaderMatchID, lastLabel, lastRequired)
+			}
 			return false, true
 		}
 		wait := pollInterval
@@ -1950,6 +1975,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		leader := lobbyGroup.GetLeader()
 		if leader == nil {
 			logger.Warn("Party leader not found during poll")
+			params.noteFollowRelease(followReleaseNoLeader, MatchID{}, nil, 0)
 			return false
 		}
 
@@ -2023,11 +2049,13 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 			}
 		}
 		requiredSlots := partySize - countInMatch
+		lastLeaderMatchID, lastLabel, lastRequired = leaderMatchID, label, requiredSlots
 
 		if !label.Open || label.OpenPlayerSlots() < requiredSlots {
 			if !label.IsSocial() {
 				nonJoinableCycles++
 				if nonJoinableCycles >= maxNonJoinableCycles {
+					params.noteFollowRelease(followReleasePollNonJoinable, leaderMatchID, label, requiredSlots)
 					return false
 				}
 			}
@@ -2046,6 +2074,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 		if label.Mode != evr.ModeSocialPublic {
 			logger.Info("Leader is in a non-social match during poll, follow path not applicable",
 				zap.String("leader_match_mode", label.Mode.String()))
+			params.noteFollowRelease(followReleasePollNonSocialMatch, leaderMatchID, label, requiredSlots)
 			return false
 		}
 
@@ -2083,6 +2112,7 @@ func (p *EvrPipeline) pollFollowPartyLeader(ctx context.Context, logger *zap.Log
 				continue
 			}
 			logger.Warn("Failed to join leader's lobby during poll", zap.Error(err))
+			params.noteFollowRelease(followReleasePollJoinFailed, leaderMatchID, label, requiredSlots)
 			return false
 		}
 		// Observer: follower joined leader's social lobby during poll.

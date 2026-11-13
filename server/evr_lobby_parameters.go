@@ -81,6 +81,9 @@ type LobbySessionParameters struct {
 	// started, by captureMemberRecordAtFind; see memberRecordAtFindEntry.
 	memberRecordAtFind         *PresenceMeta
 	memberRecordAtFindCaptured bool
+	// followRelease is why the last follow attempt returned false; see
+	// noteFollowRelease. Read by lobbyFind when it releases the follower.
+	followRelease *followRelease
 }
 
 func (p *LobbySessionParameters) GetPartySize() int {
