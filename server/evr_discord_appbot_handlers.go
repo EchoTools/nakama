@@ -696,7 +696,7 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 		if strings.Contains(err.Error(), "bad request: feature not supported") {
 			err = NewLobbyErrorf(BadRequest, "required features not supported")
 		}
-		logger.Warn("Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
+		LogWarn(logger, "Failed to allocate game server", zap.Error(err), zap.Any("settings", settings))
 		return nil, 0, fmt.Errorf("failed to allocate game server: %w", err)
 	}
 
@@ -744,7 +744,7 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		if maxPlayers, ok := group.CreateCommandMaxPlayersByMode[mode.String()]; ok && maxPlayers > 0 {
 			count, err := d.nk.StreamCount(StreamModeGuildGroup, groupID, "", mode.String())
 			if err != nil {
-				logger.Warn("Failed to get player count for mode", zap.String("mode", mode.String()), zap.Error(err))
+				LogWarn(logger, "Failed to get player count for mode", zap.String("mode", mode.String()), zap.Error(err))
 			} else if count >= maxPlayers {
 				return nil, 0, status.Errorf(codes.FailedPrecondition,
 					"there are already %d players in %s — the matchmaker will find you a game faster than /create. Use the queue instead!",
@@ -1068,20 +1068,20 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				// Common failures: user has DMs disabled, blocked bot, or left shared servers.
 				// The enforcement action still applies, and users can check /whoami for details.
 				// Failed attempts are tracked in metrics and notification status for review.
-				logger.Warn("Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.ID))
+				LogWarn(logger, "Failed to send enforcement notification DM", zap.Error(err), zap.String("user_id", target.ID))
 			}
 			// Update the record with notification status (tracks both success and failure)
 			if updateErr := journal.UpdateRecordNotificationStatus(groupID, record.ID, sent); updateErr != nil {
-				logger.Warn("Failed to update notification status", zap.Error(updateErr))
+				LogWarn(logger, "Failed to update notification status", zap.Error(updateErr))
 			}
 			// Save the updated journal with notification status
 			if err := StorableWrite(ctx, nk, targetUserID, journal); err != nil {
-				logger.Warn("Failed to save journal after notification update", zap.Error(err))
+				LogWarn(logger, "Failed to save journal after notification update", zap.Error(err))
 			}
 
 			// Record metrics for this enforcement action
 			if err := RecordEnforcementMetrics(ctx, nk, record, sent); err != nil {
-				logger.Warn("Failed to record enforcement metrics", zap.Error(err))
+				LogWarn(logger, "Failed to record enforcement metrics", zap.Error(err))
 			}
 
 		} else if voidActiveSuspensions {
@@ -1119,7 +1119,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 					// Record voiding to public enforcement log if enabled
 					// Record voiding metrics
 					if err := RecordVoidingMetrics(ctx, nk, currentGroupID, targetUserID); err != nil {
-						logger.Warn("Failed to record voiding metrics", zap.Error(err))
+						LogWarn(logger, "Failed to record voiding metrics", zap.Error(err))
 					}
 				}
 			}
@@ -1324,7 +1324,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				<-time.After(time.Second * 5)
 				// Just disconnect the user, wholesale
 				if count, err := DisconnectUserID(ctx, d.nk, targetUserID, true, true, false); err != nil {
-					logger.Warn("Failed to disconnect user", zap.Error(err))
+					LogWarn(logger, "Failed to disconnect user", zap.Error(err))
 				} else if count > 0 {
 					_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s disconnected player %s (%s) from login/match service (%d sessions).", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), count), false)
 				}

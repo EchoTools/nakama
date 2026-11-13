@@ -2273,7 +2273,7 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Check if the caller is a global operator (Moderator+)
 	isModerator, err := CheckSystemGroupMembership(ctx, db, callerID, GroupGlobalOperators)
 	if err != nil {
-		logger.Error("Failed to check moderator status", zap.Error(err))
+		LogError(logger, "Failed to check moderator status", zap.Error(err))
 		return "", runtime.NewError("Failed to check permissions", StatusInternalError)
 	}
 
@@ -2306,7 +2306,7 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Get the current account to retrieve the old display name
 	account, err := nk.AccountGetId(ctx, targetUserID)
 	if err != nil {
-		logger.Error("Failed to get account", zap.Error(err))
+		LogError(logger, "Failed to get account", zap.Error(err))
 		return "", runtime.NewError("Failed to get target user account", StatusNotFound)
 	}
 
@@ -2314,18 +2314,18 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	// Update the display name
 	if err := nk.AccountUpdateId(ctx, targetUserID, "", nil, sanitizedName, "", "", "", ""); err != nil {
-		logger.Error("Failed to update display name", zap.Error(err))
+		LogError(logger, "Failed to update display name", zap.Error(err))
 		return "", runtime.NewError("Failed to update display name", StatusInternalError)
 	}
 
 	// Also update the EVRProfile active group's in-game name so the change is durable and
 	// not overwritten by Discord/member syncs.
 	if evrProfile, err := EVRProfileLoad(ctx, nk, targetUserID); err != nil {
-		logger.Error("Failed to load EVR profile for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+		LogError(logger, "Failed to load EVR profile for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
 	} else if evrProfile != nil {
 		activeGroupID := evrProfile.GetActiveGroupID()
 		if activeGroupID == uuid.Nil {
-			logger.Warn("EVR profile has no active group for admin rename", zap.String("user_id", targetUserID))
+			LogWarn(logger, "EVR profile has no active group for admin rename", zap.String("user_id", targetUserID))
 		} else {
 			// Ensure GroupInGameName exists and update it.
 			ignData := evrProfile.GetGroupIGNData(activeGroupID.String())
@@ -2335,11 +2335,11 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 			evrProfile.SetGroupIGNData(activeGroupID.String(), ignData)
 
 			if err := EVRProfileUpdate(ctx, nk, targetUserID, evrProfile); err != nil {
-				logger.Error("Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
+				LogError(logger, "Failed to persist EVR profile rename", zap.Error(err), zap.String("user_id", targetUserID))
 			} else {
 				// Record the change in display name history for auditability.
 				if err := DisplayNameHistoryUpdate(ctx, nk, targetUserID, activeGroupID.String(), sanitizedName, account.User.Username, false); err != nil {
-					logger.Error("Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
+					LogError(logger, "Failed to update display name history for admin rename", zap.Error(err), zap.String("user_id", targetUserID))
 				}
 			}
 		}
@@ -2348,7 +2348,7 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 	// Get the caller's account for audit log
 	callerAccount, err := nk.AccountGetId(ctx, callerID)
 	if err != nil {
-		logger.Warn("Failed to get caller account for audit log", zap.Error(err))
+		LogWarn(logger, "Failed to get caller account for audit log", zap.Error(err))
 	}
 	callerDiscordID := callerID
 	if callerAccount != nil && callerAccount.CustomId != "" {
@@ -2369,10 +2369,10 @@ func AdminPlayerRenameRPC(ctx context.Context, logger runtime.Logger, db *sql.DB
 
 	// Log to Discord audit channel
 	if err := AuditLogSend(dg, ServiceSettings().ServiceAuditChannelID, auditMsg); err != nil {
-		logger.Warn("Failed to log audit message", zap.Error(err))
+		LogWarn(logger, "Failed to log audit message", zap.Error(err))
 	}
 
-	logger.Info("Admin player rename completed",
+	LogInfo(logger, "Admin player rename completed",
 		zap.String("caller_id", callerID),
 		zap.String("target_user_id", targetUserID),
 		zap.String("old_name", oldDisplayName),

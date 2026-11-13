@@ -53,11 +53,11 @@ func ServiceSettingsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	// Update in-memory and persist
 	ServiceSettingsUpdate(&incoming)
 	if err := ServiceSettingsSave(ctx, nk); err != nil {
-		logger.Error("Failed to save service settings", zap.Error(err))
+		LogError(logger, "Failed to save service settings", zap.Error(err))
 		return "", runtime.NewError("Failed to save settings", StatusInternalError)
 	}
 
-	logger.Info("Service settings updated",
+	LogInfo(logger, "Service settings updated",
 		zap.String("caller_id", func() string { s, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string); return s }()),
 	)
 

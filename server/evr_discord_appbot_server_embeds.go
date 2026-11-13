@@ -84,7 +84,7 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 	// Delete any previous embeds for this channel to avoid stale status messages
 	for _, msgID := range prevMessageIDs {
 		if err := s.ChannelMessageDelete(channelID, msgID); err != nil {
-			logger.Warn("Failed to delete previous server status embed",
+			LogWarn(logger, "Failed to delete previous server status embed",
 				zap.Error(err),
 				zap.String("channelID", channelID),
 				zap.String("messageID", msgID),
@@ -107,7 +107,7 @@ func (d *DiscordAppBot) handleShowServerEmbeds(ctx context.Context, logger runti
 		embed := d.createServerEmbed(label)
 		msg, err := s.ChannelMessageSendEmbed(channelID, embed)
 		if err != nil {
-			logger.Warn("Failed to send embed", zap.Error(err), zap.String("matchID", label.ID.String()))
+			LogWarn(logger, "Failed to send embed", zap.Error(err), zap.String("matchID", label.ID.String()))
 			continue
 		}
 		embedInfo.MessageIDs[label.ID.String()] = msg.ID
@@ -146,7 +146,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 	// blocking other operations on this tracker during potentially slow I/O.
 	matches, err := d.nk.MatchList(ctx, MatchListLimit, true, "", nil, nil, "*")
 	if err != nil {
-		logger.Warn("Failed to list matches for embed update", zap.Error(err))
+		LogWarn(logger, "Failed to list matches for embed update", zap.Error(err))
 		return
 	}
 
@@ -189,13 +189,13 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 			// Update existing embed
 			_, err := s.ChannelMessageEditEmbed(embedInfo.ChannelID, messageID, embed)
 			if err != nil {
-				logger.Warn("Failed to update embed", zap.Error(err), zap.String("matchID", matchID))
+				LogWarn(logger, "Failed to update embed", zap.Error(err), zap.String("matchID", matchID))
 			}
 		} else {
 			// Create new embed for new match
 			msg, err := s.ChannelMessageSendEmbed(embedInfo.ChannelID, embed)
 			if err != nil {
-				logger.Warn("Failed to send new embed", zap.Error(err), zap.String("matchID", matchID))
+				LogWarn(logger, "Failed to send new embed", zap.Error(err), zap.String("matchID", matchID))
 				continue
 			}
 			embedInfo.MessageIDs[matchID] = msg.ID
@@ -219,7 +219,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 				}
 				_, err := s.ChannelMessageEditEmbed(embedInfo.ChannelID, messageID, overEmbed)
 				if err != nil {
-					logger.Warn("Failed to mark embed as over", zap.Error(err), zap.String("matchID", matchID))
+					LogWarn(logger, "Failed to mark embed as over", zap.Error(err), zap.String("matchID", matchID))
 				}
 			}
 		}
@@ -231,7 +231,7 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 			if messageID, exists := embedInfo.MessageIDs[matchID]; exists {
 				err := s.ChannelMessageDelete(embedInfo.ChannelID, messageID)
 				if err != nil {
-					logger.Warn("Failed to delete old embed", zap.Error(err), zap.String("matchID", matchID))
+					LogWarn(logger, "Failed to delete old embed", zap.Error(err), zap.String("matchID", matchID))
 				}
 				delete(embedInfo.MessageIDs, matchID)
 				delete(embedInfo.CompletedAt, matchID)
@@ -400,7 +400,7 @@ func collectGuildLabels(logger runtime.Logger, matches []*api.Match, groupID str
 		}
 		label, err := MatchLabelFromString(match.Label.Value)
 		if err != nil {
-			logger.Warn("Failed to parse match label", zap.Error(err))
+			LogWarn(logger, "Failed to parse match label", zap.Error(err))
 			continue
 		}
 		if label.GroupID == nil || label.GroupID.String() != groupID {

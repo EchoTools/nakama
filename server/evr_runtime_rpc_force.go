@@ -37,7 +37,7 @@ func CheckForceUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 	// Check if they are part of the force user group
 	groups, _, err := nk.GroupsList(ctx, "Force Users", "", nil, nil, 100, "")
 	if err != nil {
-		logger.Error("Failed to get groups", zap.Error(err))
+		LogError(logger, "Failed to get groups", zap.Error(err))
 		return "", runtime.NewError("failed to get groups", StatusInternalError)
 	}
 
@@ -49,7 +49,7 @@ func CheckForceUserRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, n
 
 	members, _, err := nk.GroupUsersList(ctx, group.Id, 1000, nil, "")
 	if err != nil {
-		logger.Error("Failed to get group members", zap.Error(err))
+		LogError(logger, "Failed to get group members", zap.Error(err))
 		return "", runtime.NewError("failed to get group members", StatusInternalError)
 	}
 

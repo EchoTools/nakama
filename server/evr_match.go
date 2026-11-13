@@ -335,13 +335,13 @@ func (m *EvrMatch) MatchJoinAttempt(ctx context.Context, logger runtime.Logger, 
 	if enableEarlyQuitPenalty && !meta.Presence.IsSpectator() && nk != nil {
 		eqConfig := NewEarlyQuitPlayerState()
 		if err := StorableRead(ctx, nk, joinPresence.GetUserId(), eqConfig, true); err != nil {
-			logger.Debug("Failed to load early quit config for logging", zap.Error(err))
+			LogDebug(logger, "Failed to load early quit config for logging", zap.Error(err))
 		} else if eqConfig.PenaltyLevel > 0 && eqConfig.PenaltyTimestamp > 0 && time.Now().Unix() < eqConfig.PenaltyTimestamp {
 			remainingTime := time.Until(time.Unix(eqConfig.PenaltyTimestamp, 0))
 			if isEarlyQuitEnforcementTestUser(joinPresence.GetUserId()) && earlyQuitEnforcementEnabled(ctx, nk, logger, state.GetGroupID().String()) {
 				return state, false, fmt.Sprintf("early quit penalty active [exp: %s]", FormatDuration(remainingTime))
 			}
-			logger.Info("Player joining with active early quit penalty (client-side enforcement expected)",
+			LogInfo(logger, "Player joining with active early quit penalty (client-side enforcement expected)",
 				zap.String("user_id", joinPresence.GetUserId()),
 				zap.Int32("penalty_level", eqConfig.PenaltyLevel),
 				zap.Duration("remaining", remainingTime))
@@ -779,11 +779,11 @@ func recordEarlyQuitForPlayer(ctx context.Context, logger runtime.Logger, nk run
 		// Prune old records (keep last 90 days)
 		prunedQuits, prunedCompletions := history.PruneOldRecords(90 * 24 * time.Hour)
 		if prunedQuits > 0 || prunedCompletions > 0 {
-			logger.Debug("Pruned old early quit history records", zap.Int("quits", prunedQuits), zap.Int("completions", prunedCompletions))
+			LogDebug(logger, "Pruned old early quit history records", zap.Int("quits", prunedQuits), zap.Int("completions", prunedCompletions))
 		}
 
 		if err := StorableWrite(ctx, nk, mp.GetUserId(), history); err != nil {
-			logger.Warn("Failed to write early quit history", zap.Error(err))
+			LogWarn(logger, "Failed to write early quit history", zap.Error(err))
 		}
 	}
 }
@@ -1142,7 +1142,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 							}).Debug("Early quitter tier update.")
 
 							if err := StorableWrite(ctx, nk, mp.GetUserId(), eqconfig); err != nil {
-								logger.Warn("Failed to write early quitter config", zap.Error(err))
+								LogWarn(logger, "Failed to write early quitter config", zap.Error(err))
 							} else {
 								if sessions != nil {
 									if s := sessions.Get(uuid.FromStringOrNil(mp.GetSessionId())); s != nil {
@@ -1171,7 +1171,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 									if tierChanged {
 										discordID, err := GetDiscordIDByUserID(ctx, db, mp.GetUserId())
 										if err != nil {
-											logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+											LogWarn(logger, "Failed to get Discord ID for tier notification", zap.Error(err))
 										} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
 											var message string
 											if oldTier > newTier {
@@ -1182,7 +1182,7 @@ func (m *EvrMatch) MatchLeave(ctx context.Context, logger runtime.Logger, db *sq
 												message = TierRestoredMessage
 											}
 											if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-												logger.Warn("Failed to send tier change DM", zap.Error(err))
+												LogWarn(logger, "Failed to send tier change DM", zap.Error(err))
 											}
 										}
 									}
@@ -1710,7 +1710,7 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					writeErr = StorableWrite(ctx, nk, presence.GetUserId(), eqconfig)
 				}
 				if writeErr != nil {
-					logger.Warn("Failed to write early quitter config after completed match", zap.Error(writeErr))
+					LogWarn(logger, "Failed to write early quitter config after completed match", zap.Error(writeErr))
 				} else {
 					if sessions != nil {
 						if s := sessions.Get(uuid.FromStringOrNil(presence.GetSessionId())); s != nil {
@@ -1724,11 +1724,11 @@ func (m *EvrMatch) MatchLoop(ctx context.Context, logger runtime.Logger, db *sql
 					if tierChanged && newTier == MatchmakingTier1 && !serviceSettings.Matchmaking.SilentEarlyQuitSystem {
 						discordID, err := GetDiscordIDByUserID(ctx, db, presence.GetUserId())
 						if err != nil {
-							logger.Warn("Failed to get Discord ID for tier notification", zap.Error(err))
+							LogWarn(logger, "Failed to get Discord ID for tier notification", zap.Error(err))
 						} else if appBot := globalAppBot.Load(); appBot != nil && appBot.dg != nil {
 							message := TierRestoredMessage
 							if _, err := SendUserMessage(ctx, appBot.dg, discordID, message); err != nil {
-								logger.Warn("Failed to send tier restored Discord DM", zap.Error(err))
+								LogWarn(logger, "Failed to send tier restored Discord DM", zap.Error(err))
 							}
 						}
 					}
@@ -2190,7 +2190,7 @@ func (m *EvrMatch) MatchSignal(ctx context.Context, logger runtime.Logger, db *s
 		}
 		// Trigger the MatchLeave event for the game server.
 		if err := nk.StreamUserLeave(StreamModeMatchAuthoritative, state.ID.UUID.String(), "", state.ID.Node, state.GameServer.GetUserId(), state.GameServer.GetSessionId()); err != nil {
-			logger.Warn("Failed to leave match stream", zap.Error(err))
+			LogWarn(logger, "Failed to leave match stream", zap.Error(err))
 			return nil, SignalResponse{Message: fmt.Sprintf("failed to leave match stream: %v", err)}.String()
 		}
 
@@ -2457,7 +2457,7 @@ func (m *EvrMatch) MatchStart(ctx context.Context, logger runtime.Logger, db *sq
 		}
 		if len(botMessages) > 0 {
 			if err := m.dispatchMessages(ctx, logger, dispatcher, botMessages, []runtime.Presence{state.server}, nil); err != nil {
-				logger.Warn("Failed to dispatch bot spawn messages", zap.Error(err))
+				LogWarn(logger, "Failed to dispatch bot spawn messages", zap.Error(err))
 			}
 		}
 	}
@@ -2570,7 +2570,7 @@ func shouldAutoReportEarlyQuit(settings *GlobalMatchmakingSettings, penaltyLevel
 
 // TriggerAutoReport logs an auto-report event for players at max early quit penalty level
 func TriggerAutoReport(ctx context.Context, logger runtime.Logger, userID string, penaltyLevel int32) {
-	logger.Info("Auto-report triggered for player with max early quit penalty",
+	LogInfo(logger, "Auto-report triggered for player with max early quit penalty",
 		zap.String("user_id", userID),
 		zap.Int32("penalty_level", penaltyLevel))
 }
@@ -2768,7 +2768,7 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 		return fmt.Errorf("failed to allocate social lobby for post-match transition: %w", err)
 	}
 
-	logger.Info("Allocated social lobby for post-match transition",
+	LogInfo(logger, "Allocated social lobby for post-match transition",
 		zap.String("new_lobby_id", label.ID.String()),
 		zap.Int("participant_count", len(participants)))
 
@@ -2776,14 +2776,14 @@ func allocatePostMatchSocialLobby(ctx context.Context, logger runtime.Logger, nk
 	for _, presence := range participants {
 		userID := presence.GetUserId()
 		if err := SetNextMatchID(ctx, nk, userID, label.ID, AnyTeam, ""); err != nil {
-			logger.Warn("Failed to set next_match_id for participant",
+			LogWarn(logger, "Failed to set next_match_id for participant",
 				zap.String("user_id", userID),
 				zap.String("next_match_id", label.ID.String()),
 				zap.Error(err))
 			// Continue setting for other participants even if one fails
 			continue
 		}
-		logger.Debug("Set next_match_id for participant",
+		LogDebug(logger, "Set next_match_id for participant",
 			zap.String("user_id", userID),
 			zap.String("next_match_id", label.ID.String()))
 	}

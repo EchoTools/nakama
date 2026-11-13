@@ -53,7 +53,7 @@ func regionsFor(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
-		logger.Error("Failed to read latency history", zap.Error(err))
+		LogError(logger, "Failed to read latency history", zap.Error(err))
 		return regionView{}, err
 	}
 
@@ -66,7 +66,7 @@ func regionsFor(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 
 	matches, err := nk.MatchList(ctx, 100, true, "", &minSize, &maxSize, query)
 	if err != nil {
-		logger.Error("Failed to list servers", zap.Error(err))
+		LogError(logger, "Failed to list servers", zap.Error(err))
 		return regionView{}, err
 	}
 
@@ -74,7 +74,7 @@ func regionsFor(ctx context.Context, logger runtime.Logger, nk runtime.NakamaMod
 	for _, m := range matches {
 		label := MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), &label); err != nil {
-			logger.Error("Failed to unmarshal match label", zap.Error(err))
+			LogError(logger, "Failed to unmarshal match label", zap.Error(err))
 			continue
 		}
 		if label.GameServer == nil {
@@ -126,7 +126,7 @@ func (d *DiscordAppBot) autocompleteRegions(ctx context.Context, logger runtime.
 	if restrictPing {
 		privileged, err := isRegionPrivileged(ctx, d.db, d.nk, userID, groupID)
 		if err != nil {
-			logger.Warn("Failed to check region privileges, defaulting to restricted", zap.Error(err))
+			LogWarn(logger, "Failed to check region privileges, defaulting to restricted", zap.Error(err))
 		}
 		if privileged {
 			restrictPing = false
@@ -176,7 +176,7 @@ func (g GameServerAutocompleteData) Description() string {
 func (d *DiscordAppBot) autocompleteGameServers(ctx context.Context, logger runtime.Logger, userID string, groupID string) ([]*discordgo.ApplicationCommandOptionChoice, error) {
 	latencyHistory := NewLatencyHistory()
 	if err := StorableRead(ctx, d.nk, userID, latencyHistory, false); err != nil && status.Code(err) != codes.NotFound {
-		logger.Error("Failed to read latency history", zap.Error(err))
+		LogError(logger, "Failed to read latency history", zap.Error(err))
 		return nil, err
 	}
 

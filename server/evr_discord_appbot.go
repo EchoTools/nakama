@@ -1158,7 +1158,7 @@ func init() {
 func (d *DiscordAppBot) UnregisterCommandsAll(ctx context.Context, logger runtime.Logger, dg *discordgo.Session) {
 	guilds, err := dg.UserGuilds(100, "", "", false)
 	if err != nil {
-		logger.Error("Error fetching guilds,", zap.Error(err))
+		LogError(logger, "Error fetching guilds,", zap.Error(err))
 		return
 	}
 	for _, guild := range guilds {
@@ -1180,16 +1180,16 @@ func (d *DiscordAppBot) UnregisterCommands(ctx context.Context, logger runtime.L
 
 	commands, err := dg.ApplicationCommands(botID, guildID)
 	if err != nil {
-		logger.Error("Error fetching commands,", zap.Error(err))
+		LogError(logger, "Error fetching commands,", zap.Error(err))
 		return
 	}
 
 	for _, command := range commands {
 		err := dg.ApplicationCommandDelete(botID, guildID, command.ID)
 		if err != nil {
-			logger.Error("Error deleting command,", zap.Error(err))
+			LogError(logger, "Error deleting command,", zap.Error(err))
 		} else {
-			logger.Info("Deleted command", zap.String("command", command.Name))
+			LogInfo(logger, "Deleted command", zap.String("command", command.Name))
 		}
 	}
 }
@@ -1274,7 +1274,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					<-time.After(10 * time.Minute)
 					// Delete the message after 5 minutes
 					if err := s.ChannelMessageDelete(i.ChannelID, message.ID); err != nil {
-						logger.Error("Failed to delete message", zap.Error(err))
+						LogError(logger, "Failed to delete message", zap.Error(err))
 					}
 				}()
 			}
@@ -1368,7 +1368,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							Title: "Party has been empty for more than 2 minutes.",
 						}},
 					}); err != nil {
-						logger.Error("Failed to edit interaction response", zap.Error(err))
+						LogError(logger, "Failed to edit interaction response", zap.Error(err))
 					}
 				}()
 
@@ -1415,7 +1415,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// List the party members.
 					members, err = nk.StreamUserList(StreamModeParty, partyStr, "", d.pipeline.node, false, true)
 					if err != nil {
-						logger.Error("Failed to list stream users", zap.Error(err))
+						LogError(logger, "Failed to list stream users", zap.Error(err))
 						return
 					}
 
@@ -1438,7 +1438,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					// List who is matchmaking
 					currentlyMatchmaking, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", false, true)
 					if err != nil {
-						logger.Error("Failed to list stream users", zap.Error(err))
+						LogError(logger, "Failed to list stream users", zap.Error(err))
 						return
 					}
 
@@ -1449,7 +1449,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 							// Unmarshal the user status
 							if err := json.Unmarshal([]byte(p.GetStatus()), matchmakingStates[p.GetUserId()]); err != nil {
-								logger.Error("Failed to unmarshal user status", zap.Error(err))
+								LogError(logger, "Failed to unmarshal user status", zap.Error(err))
 								continue
 							}
 
@@ -1467,7 +1467,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 							if member, ok = memberCache[discordIDs[j]]; !ok {
 								if member, err = d.cache.GuildMember(i.GuildID, discordIDs[j]); err != nil {
-									logger.Error("Failed to get guild member", zap.Error(err))
+									LogError(logger, "Failed to get guild member", zap.Error(err))
 									embeds[j].Title = "*Unknown User*"
 									continue
 								} else if member != nil {
@@ -1511,7 +1511,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								Embeds: embeds,
 							},
 						}); err != nil {
-							logger.Error("Failed to send interaction response", zap.Error(err))
+							LogError(logger, "Failed to send interaction response", zap.Error(err))
 							return
 						}
 
@@ -1527,7 +1527,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Content: ptr.String("Party Status"),
 						Embeds:  &embeds,
 					}); err != nil {
-						logger.Error("Failed to edit interaction response", zap.Error(err))
+						LogError(logger, "Failed to edit interaction response", zap.Error(err))
 						return
 					}
 
@@ -2296,7 +2296,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 			guild, err := s.Guild(i.GuildID)
 			if err != nil {
-				logger.Error("Failed to get guild", zap.Error(err))
+				LogError(logger, "Failed to get guild", zap.Error(err))
 				return err
 			}
 
@@ -2346,7 +2346,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				Components: &components,
 			})
 			if err != nil {
-				logger.Error("Failed to send IP verification message", zap.Error(err))
+				LogError(logger, "Failed to send IP verification message", zap.Error(err))
 				return err
 			}
 
@@ -2510,7 +2510,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			failedMembers := make([]string, 0)
 			for _, memberUserID := range partyUserIDs {
 				if err := SetNextMatchID(ctx, nk, memberUserID, label.ID, role, ""); err != nil {
-					logger.Error("Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
+					LogError(logger, "Failed to set next match ID for party member", zap.String("memberUserID", memberUserID), zap.Error(err))
 					failedMembers = append(failedMembers, memberUserID)
 				}
 			}
@@ -2518,7 +2518,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// If some party members failed, log but continue with partial success
 			successfulMembers := len(partyUserIDs) - len(failedMembers)
 			if len(failedMembers) > 0 {
-				logger.Warn("Some party members failed to get next_match_id set",
+				LogWarn(logger, "Some party members failed to get next_match_id set",
 					zap.Int("successful", successfulMembers),
 					zap.Int("failed", len(failedMembers)),
 					zap.Strings("failedUserIDs", failedMembers))
@@ -2559,7 +2559,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			// local the guild name
 			guild, err := s.Guild(i.GuildID)
 			if err != nil {
-				logger.Error("Failed to get guild", zap.Error(err))
+				LogError(logger, "Failed to get guild", zap.Error(err))
 			}
 			responseContent := &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -2632,7 +2632,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					presences, err := d.nk.StreamUserList(StreamModeMatchAuthoritative, label.ID.UUID.String(), "", label.ID.Node, false, true)
 					if err != nil {
-						logger.Error("Failed to get user list", zap.Error(err))
+						LogError(logger, "Failed to get user list", zap.Error(err))
 					}
 					if len(presences) == 0 {
 						// Match is gone. update the response.
@@ -2646,7 +2646,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 								logger.Info("interaction token expired; stopping match monitor")
 								return
 							}
-							logger.Error("Failed to update interaction", zap.Error(err))
+							LogError(logger, "Failed to update interaction", zap.Error(err))
 						}
 						return
 					}
@@ -2670,7 +2670,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 							logger.Info("interaction token expired; stopping match monitor")
 							return
 						}
-						logger.Error("Failed to update interaction", zap.Error(err))
+						LogError(logger, "Failed to update interaction", zap.Error(err))
 						return
 					}
 
@@ -2843,7 +2843,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					for _, session := range sessions {
 						// Send early quit config (penalty tier configuration)
 						if err := trigger.SendEarlyQuitConfigOnLogin(ctx, session); err != nil {
-							logger.Warn("Failed to send early quit config",
+							LogWarn(logger, "Failed to send early quit config",
 								zap.String("user_id", targetUserID),
 								zap.String("session_id", session.ID().String()),
 								zap.Error(err))
@@ -2851,7 +2851,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 						// Send feature flags
 						if err := trigger.SendFeatureFlagsOnLogin(ctx, session); err != nil {
-							logger.Warn("Failed to send early quit feature flags",
+							LogWarn(logger, "Failed to send early quit feature flags",
 								zap.String("user_id", targetUserID),
 								zap.String("session_id", session.ID().String()),
 								zap.Error(err))
@@ -2860,16 +2860,16 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					// Send early quit update notification
 					if err := trigger.SendEarlyQuitUpdateNotification(ctx, targetUserID, config); err != nil {
-						logger.Warn("Failed to send early quit update notification",
+						LogWarn(logger, "Failed to send early quit update notification",
 							zap.String("user_id", targetUserID),
 							zap.Error(err))
 					}
 
-					logger.Info("Sent all early quit messages to online player",
+					LogInfo(logger, "Sent all early quit messages to online player",
 						zap.String("user_id", targetUserID),
 						zap.Int("session_count", len(sessions)))
 				} else {
-					logger.Debug("Player not online - messages will be sent on next login",
+					LogDebug(logger, "Player not online - messages will be sent on next login",
 						zap.String("user_id", targetUserID))
 				}
 			}
@@ -3240,7 +3240,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			go func() {
 				for _, m := range messages {
 					if _, err := s.ChannelMessageSend(channel.ID, m); err != nil {
-						logger.Warn("Failed to send message", zap.Error(err))
+						LogWarn(logger, "Failed to send message", zap.Error(err))
 						return
 					}
 					// Ensure it's stays below 25 messages per second
@@ -3269,7 +3269,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 				if err != nil {
-					logger.Error("Failed to read matchmaking config", zap.Error(err))
+					LogError(logger, "Failed to read matchmaking config", zap.Error(err))
 				}
 				matchmakingConfig := &MatchmakingSettings{}
 				if len(objs) != 0 {
@@ -3377,7 +3377,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					},
 				})
 				if err != nil {
-					logger.Error("Failed to read matchmaking config", zap.Error(err))
+					LogError(logger, "Failed to read matchmaking config", zap.Error(err))
 				}
 				matchmakingConfig := &MatchmakingSettings{}
 				if len(objs) != 0 {
@@ -3693,7 +3693,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				account, err := nk.AccountGetId(ctx, userID)
 				if err != nil || account == nil {
-					logger.Error("Failed to get account", zap.Error(err))
+					LogError(logger, "Failed to get account", zap.Error(err))
 					return
 				}
 
@@ -3731,7 +3731,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
 					},
 				}); err != nil {
-					logger.Error("Failed to respond to interaction", zap.Error(err))
+					LogError(logger, "Failed to respond to interaction", zap.Error(err))
 				}
 
 			case "create", "show":
@@ -3771,7 +3771,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 					choices, err = d.autocompleteRegions(ctx, logger, userID, groupID, mode)
 					if err != nil {
-						logger.Error("Failed to get regions", zap.Error(err))
+						LogError(logger, "Failed to get regions", zap.Error(err))
 						return
 					}
 					d.choiceCache.Store(cacheKey, choices)
@@ -3806,7 +3806,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Choices: choices, // This is basically the whole purpose of autocomplete interaction - return custom options to the user.
 					},
 				}); err != nil {
-					logger.Error("Failed to respond to interaction", zap.Error(err))
+					LogError(logger, "Failed to respond to interaction", zap.Error(err))
 				}
 			case "set-division":
 				// Provide division autocomplete
@@ -3850,7 +3850,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Choices: choices,
 					},
 				}); err != nil {
-					logger.Error("Failed to respond to interaction", zap.Error(err))
+					LogError(logger, "Failed to respond to interaction", zap.Error(err))
 				}
 			case "loadout":
 				if len(data.Options) == 0 {
@@ -3901,7 +3901,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 					return
 				}
 				if err != nil {
-					logger.Error("Failed to build loadout autocomplete choices", zap.Error(err))
+					LogError(logger, "Failed to build loadout autocomplete choices", zap.Error(err))
 					return
 				}
 
@@ -3912,7 +3912,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Choices: choices,
 					},
 				}); err != nil {
-					logger.Error("Failed to respond to loadout autocomplete", zap.Error(err))
+					LogError(logger, "Failed to respond to loadout autocomplete", zap.Error(err))
 				}
 
 			case "blacklist-server":
@@ -3930,7 +3930,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				serverChoices, err := d.autocompleteGameServers(ctx, logger, userID, groupID)
 				if err != nil {
-					logger.Error("Failed to get game servers for blacklist autocomplete", zap.Error(err))
+					LogError(logger, "Failed to get game servers for blacklist autocomplete", zap.Error(err))
 					return
 				}
 				if partial != "" {
@@ -3948,7 +3948,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Choices: serverChoices,
 					},
 				}); err != nil {
-					logger.Error("Failed to respond to blacklist-server autocomplete", zap.Error(err))
+					LogError(logger, "Failed to respond to blacklist-server autocomplete", zap.Error(err))
 				}
 
 			case "blacklist-server-remove":
@@ -3980,7 +3980,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 						Choices: removeChoices,
 					},
 				}); err != nil {
-					logger.Error("Failed to respond to blacklist-server-remove autocomplete", zap.Error(err))
+					LogError(logger, "Failed to respond to blacklist-server-remove autocomplete", zap.Error(err))
 				}
 			}
 
@@ -3997,7 +3997,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				data := i.ModalSubmitData()
 				member, err := d.dg.GuildMember(i.GuildID, i.Member.User.ID)
 				if err != nil {
-					logger.Error("Failed to get guild member", zap.Error(err))
+					LogError(logger, "Failed to get guild member", zap.Error(err))
 					return
 				}
 				if len(data.Components) == 0 {
@@ -4034,7 +4034,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 			case "igp":
 				if err := d.handleModalSubmit(logger, i, value); err != nil {
-					logger.Error("Failed to handle modal submit", zap.Error(err))
+					LogError(logger, "Failed to handle modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -4056,7 +4056,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				}
 				// If issueType is empty, handleServerIssueModalSubmit will extract it from modal data
 				if err := d.handleServerIssueModalSubmit(ctx, logger, s, i, issueType, serverContext); err != nil {
-					logger.Error("Failed to handle server issue modal submit", zap.Error(err))
+					LogError(logger, "Failed to handle server issue modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -4070,7 +4070,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 				// Handle IGN override modal submission
 				data := i.ModalSubmitData()
 				if err := d.handleSetIGNModalSubmit(ctx, logger, s, i, &data, value); err != nil {
-					logger.Error("Failed to handle set IGN modal submit", zap.Error(err))
+					LogError(logger, "Failed to handle set IGN modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -4083,7 +4083,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "enf_edit":
 				// Handle enforcement record edit modal submission
 				if err := d.handleEnforcementEditModalSubmit(logger, i, value); err != nil {
-					logger.Error("Failed to handle enforcement edit modal submit", zap.Error(err))
+					LogError(logger, "Failed to handle enforcement edit modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -4096,7 +4096,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 			case "enf_void":
 				// Handle enforcement record void modal submission
 				if err := d.handleEnforcementVoidModalSubmit(logger, i, value); err != nil {
-					logger.Error("Failed to handle enforcement void modal submit", zap.Error(err))
+					LogError(logger, "Failed to handle enforcement void modal submit", zap.Error(err))
 					s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 						Type: discordgo.InteractionResponseChannelMessageWithSource,
 						Data: &discordgo.InteractionResponseData{
@@ -4232,7 +4232,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 
 		state := &MatchLabel{}
 		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
-			logger.Error("Failed to unmarshal match label", zap.Error(err))
+			LogError(logger, "Failed to unmarshal match label", zap.Error(err))
 			continue
 		}
 
@@ -4269,7 +4269,7 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 				if state.SpawnedBy != "" {
 					spawnedBy, err = GetDiscordIDByUserID(ctx, d.db, state.SpawnedBy)
 					if err != nil {
-						logger.Error("Failed to get discord ID", zap.Error(err))
+						LogError(logger, "Failed to get discord ID", zap.Error(err))
 					}
 				}
 				status = fmt.Sprintf("Reserved by <@%s> <t:%d:R>", spawnedBy, state.StartTime.UTC().Unix())

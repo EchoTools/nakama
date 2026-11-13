@@ -163,7 +163,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 		}
 		targetDiscordID = targetUser.ID
 
-		logger.Info("Global operator unlinking headset for another user",
+		LogInfo(logger, "Global operator unlinking headset for another user",
 			zap.String("operatorUserID", userID),
 			zap.String("operatorDiscordID", user.ID),
 			zap.String("targetUserID", targetUserID),
@@ -184,11 +184,11 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 		// No device specified — show the select menu for the target's devices.
 		account, err := nk.AccountGetId(ctx, targetUserID)
 		if err != nil {
-			logger.Error("Failed to get account", zap.Error(err))
+			LogError(logger, "Failed to get account", zap.Error(err))
 			return fmt.Errorf("failed to get account: %w", err)
 		}
 		if account == nil {
-			logger.Error("Account not found", zap.String("user_id", targetUserID))
+			LogError(logger, "Account not found", zap.String("user_id", targetUserID))
 			return fmt.Errorf("account not found for user %s", targetUserID)
 		}
 		if len(account.Devices) == 0 {
@@ -197,7 +197,7 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 
 		loginHistory := NewLoginHistory(targetUserID)
 		if err := StorableRead(ctx, nk, targetUserID, loginHistory, true); err != nil {
-			logger.Error("Failed to load login history", zap.Error(err))
+			LogError(logger, "Failed to load login history", zap.Error(err))
 			return err
 		}
 
@@ -268,11 +268,11 @@ func (d *DiscordAppBot) handleUnlinkHeadset(ctx context.Context, logger runtime.
 	// Only allow unlinking platform device IDs (OVR-ORG-, DMO-, DSC-, etc.).
 	// Reject anything else (e.g. vrml: device links) — those must go through the dedicated VRML unlink flow.
 	if _, err := evr.ParseEvrId(xpid); err != nil {
-		logger.Warn("Attempted to unlink non-headset device via unlink-headset", zap.String("userID", targetUserID), zap.String("discordID", targetDiscordID), zap.String("deviceID", xpid))
+		LogWarn(logger, "Attempted to unlink non-headset device via unlink-headset", zap.String("userID", targetUserID), zap.String("discordID", targetDiscordID), zap.String("deviceID", xpid))
 		return editInteractionResponse(s, i, "Invalid device ID.")
 	}
 
-	logger.Info("Unlinking headset device", zap.String("userID", targetUserID), zap.String("discordID", targetDiscordID), zap.String("deviceID", xpid))
+	LogInfo(logger, "Unlinking headset device", zap.String("userID", targetUserID), zap.String("discordID", targetDiscordID), zap.String("deviceID", xpid))
 
 	if err := nk.UnlinkDevice(ctx, targetUserID, xpid); err != nil {
 		return editInteractionResponse(s, i, err.Error())

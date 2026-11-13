@@ -87,7 +87,7 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		"impersonated_by": callerID,
 	})
 	if err != nil {
-		logger.Error("Failed to generate impersonate token", zap.Error(err))
+		LogError(logger, "Failed to generate impersonate token", zap.Error(err))
 		return "", runtime.NewError("Failed to generate token", StatusInternalError)
 	}
 
@@ -98,7 +98,7 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 		"impersonated_by": callerID,
 	})
 	if err != nil {
-		logger.Error("Failed to generate impersonate refresh token", zap.Error(err))
+		LogError(logger, "Failed to generate impersonate refresh token", zap.Error(err))
 		return "", runtime.NewError("Failed to generate refresh token", StatusInternalError)
 	}
 
@@ -108,7 +108,7 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	// Load guild memberships
 	userGroups, _, err := nk.UserGroupsList(ctx, targetUserID, 100, nil, "")
 	if err != nil {
-		logger.Warn("Failed to list user groups for impersonate", zap.Error(err))
+		LogWarn(logger, "Failed to list user groups for impersonate", zap.Error(err))
 	}
 
 	var guilds []ImpersonateGuild
@@ -132,7 +132,7 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	if callerAccount != nil {
 		callerName = callerAccount.User.Username
 	}
-	logger.Warn("IMPERSONATION: developer initiated impersonation session",
+	LogWarn(logger, "IMPERSONATION: developer initiated impersonation session",
 		zap.String("caller_id", callerID),
 		zap.String("caller_name", callerName),
 		zap.String("target_id", targetUserID),
@@ -153,7 +153,7 @@ func ImpersonateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 	)
 	if settings := ServiceSettings(); settings != nil && settings.ServiceAuditChannelID != "" {
 		if err := AuditLogSend(dg, settings.ServiceAuditChannelID, auditMsg); err != nil {
-			logger.Warn("Failed to send impersonation audit log", zap.Error(err))
+			LogWarn(logger, "Failed to send impersonation audit log", zap.Error(err))
 		}
 	}
 
