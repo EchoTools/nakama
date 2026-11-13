@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 
 	nkruntime "github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
@@ -27,6 +28,9 @@ import (
 type RuntimeGoLogger struct {
 	logger *zap.Logger
 	fields map[string]interface{}
+
+	skipOnce   sync.Once
+	skipLogger *zap.Logger // logger with one more frame of caller skip; see logFromHelper
 }
 
 func NewRuntimeGoLogger(logger *zap.Logger) nkruntime.Logger {
@@ -54,23 +58,31 @@ func (l *RuntimeGoLogger) getFileLineSkip(extra int) zap.Field {
 	return zap.String("source", fmt.Sprintf("%v:%v", filename, line))
 }
 
-// logSkip logs msg verbatim at level for a caller that is extra frames above the
-// call site that should be reported: both zap's caller and the "source" field
-// then name the frame extra above logSkip's caller. It does not format.
-func (l *RuntimeGoLogger) logSkip(level zapcore.Level, extra int, msg string) {
+// logFromHelper logs msg verbatim at level with fields attached, for the Log*
+// helpers in evr_logger_fields.go, which sit one frame above the call site that
+// should be reported: both zap's caller and the "source" field then name the
+// helper's caller. The caller-skipped zap logger is built once per
+// RuntimeGoLogger rather than on every call, and fields ride on the log call
+// itself, so nothing is cloned per call.
+func (l *RuntimeGoLogger) logFromHelper(level zapcore.Level, msg string, fields []zap.Field) {
 	if !l.logger.Core().Enabled(level) {
 		return
 	}
-	zl := l.logger.WithOptions(zap.AddCallerSkip(extra))
+	l.skipOnce.Do(func() { l.skipLogger = l.logger.WithOptions(zap.AddCallerSkip(1)) })
+	if level >= zapcore.WarnLevel {
+		all := make([]zap.Field, 0, len(fields)+1)
+		all = append(all, fields...)
+		fields = append(all, l.getFileLineSkip(1))
+	}
 	switch level {
 	case zapcore.DebugLevel:
-		zl.Debug(msg)
+		l.skipLogger.Debug(msg, fields...)
 	case zapcore.InfoLevel:
-		zl.Info(msg)
+		l.skipLogger.Info(msg, fields...)
 	case zapcore.WarnLevel:
-		zl.Warn(msg, l.getFileLineSkip(extra))
+		l.skipLogger.Warn(msg, fields...)
 	default:
-		zl.Error(msg, l.getFileLineSkip(extra))
+		l.skipLogger.Error(msg, fields...)
 	}
 }
 

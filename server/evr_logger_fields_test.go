@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -8,6 +9,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -127,6 +129,21 @@ func TestLogHelpersReportTheCallSite(t *testing.T) {
 		require.Len(t, entries, 1)
 		want := fmt.Sprintf("%s:%d", thisFile, line+1+i)
 		require.Equal(t, want, fmt.Sprintf("%s:%d", entries[0].Caller.File, entries[0].Caller.Line), "%s zap caller", level)
-		require.Equal(t, want, entries[0].ContextMap()["source"], "%s source field", level)
+		if level >= zapcore.WarnLevel { // Debug/Info carry no source field
+			require.Equal(t, want, entries[0].ContextMap()["source"], "%s source field", level)
+		}
+		require.Equal(t, "v", entries[0].ContextMap()["k"])
+	}
+}
+
+// BenchmarkLogWarn measures the per-call cost of the Log* helpers on an enabled
+// level, the case that matters on a hot path.
+func BenchmarkLogWarn(b *testing.B) {
+	core := zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(io.Discard), zapcore.DebugLevel)
+	rl := NewRuntimeGoLogger(zap.New(core, zap.AddCaller()))
+	err := errors.New("boom")
+	b.ReportAllocs()
+	for b.Loop() {
+		LogWarn(rl, "Failed to allocate game server", zap.Error(err), zap.String("region", "us-east"))
 	}
 }
