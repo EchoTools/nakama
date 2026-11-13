@@ -21,6 +21,7 @@ import (
 
 	nkruntime "github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type RuntimeGoLogger struct {
@@ -36,7 +37,13 @@ func NewRuntimeGoLogger(logger *zap.Logger) nkruntime.Logger {
 }
 
 func (l *RuntimeGoLogger) getFileLine() zap.Field {
-	_, filename, line, ok := runtime.Caller(2)
+	return l.getFileLineSkip(0)
+}
+
+// getFileLineSkip is getFileLine for a caller that sits extra frames above the
+// logging method (the Log* helpers in evr_logger_fields.go).
+func (l *RuntimeGoLogger) getFileLineSkip(extra int) zap.Field {
+	_, filename, line, ok := runtime.Caller(2 + extra)
 	if !ok {
 		return zap.Skip()
 	}
@@ -45,6 +52,26 @@ func (l *RuntimeGoLogger) getFileLine() zap.Field {
 		filename = filenameSplit[1]
 	}
 	return zap.String("source", fmt.Sprintf("%v:%v", filename, line))
+}
+
+// logSkip logs msg verbatim at level for a caller that is extra frames above the
+// call site that should be reported: both zap's caller and the "source" field
+// then name the frame extra above logSkip's caller. It does not format.
+func (l *RuntimeGoLogger) logSkip(level zapcore.Level, extra int, msg string) {
+	if !l.logger.Core().Enabled(level) {
+		return
+	}
+	zl := l.logger.WithOptions(zap.AddCallerSkip(extra))
+	switch level {
+	case zapcore.DebugLevel:
+		zl.Debug(msg)
+	case zapcore.InfoLevel:
+		zl.Info(msg)
+	case zapcore.WarnLevel:
+		zl.Warn(msg, l.getFileLineSkip(extra))
+	default:
+		zl.Error(msg, l.getFileLineSkip(extra))
+	}
 }
 
 func (l *RuntimeGoLogger) Debug(format string, v ...interface{}) {

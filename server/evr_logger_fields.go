@@ -25,22 +25,45 @@ func runtimeLoggerWithZapFields(l runtime.Logger, fields []zap.Field) runtime.Lo
 	return l.WithFields(enc.Fields)
 }
 
+// The helpers call logSkip directly, with one extra frame of skip, so zap's
+// caller and the "source" field name the code that called Log*, not this file.
+
 // LogDebug logs msg verbatim (never as a format) at DEBUG with fields attached.
 func LogDebug(l runtime.Logger, msg string, fields ...zap.Field) {
-	runtimeLoggerWithZapFields(l, fields).Debug("%s", msg)
+	l = runtimeLoggerWithZapFields(l, fields)
+	if g, ok := l.(*RuntimeGoLogger); ok {
+		g.logSkip(zapcore.DebugLevel, 1, msg)
+		return
+	}
+	l.Debug("%s", msg)
 }
 
 // LogInfo logs msg verbatim at INFO with fields attached.
 func LogInfo(l runtime.Logger, msg string, fields ...zap.Field) {
-	runtimeLoggerWithZapFields(l, fields).Info("%s", msg)
+	l = runtimeLoggerWithZapFields(l, fields)
+	if g, ok := l.(*RuntimeGoLogger); ok {
+		g.logSkip(zapcore.InfoLevel, 1, msg)
+		return
+	}
+	l.Info("%s", msg)
 }
 
 // LogWarn logs msg verbatim at WARN with fields attached.
 func LogWarn(l runtime.Logger, msg string, fields ...zap.Field) {
-	runtimeLoggerWithZapFields(l, fields).Warn("%s", msg)
+	l = runtimeLoggerWithZapFields(l, fields)
+	if g, ok := l.(*RuntimeGoLogger); ok {
+		g.logSkip(zapcore.WarnLevel, 1, msg)
+		return
+	}
+	l.Warn("%s", msg)
 }
 
 // LogError logs msg verbatim at ERROR with fields attached.
 func LogError(l runtime.Logger, msg string, fields ...zap.Field) {
-	runtimeLoggerWithZapFields(l, fields).Error("%s", msg)
+	l = runtimeLoggerWithZapFields(l, fields)
+	if g, ok := l.(*RuntimeGoLogger); ok {
+		g.logSkip(zapcore.ErrorLevel, 1, msg)
+		return
+	}
+	l.Error("%s", msg)
 }

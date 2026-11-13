@@ -8,11 +8,14 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -25,7 +28,8 @@ import (
 // Neither go vet nor golangci-lint sees it: the interface method is not a
 // recognised printf wrapper. This type-checks the package, so it is exact.
 func TestNoZapFieldsOnRuntimeLogger(t *testing.T) {
-	if testing.Short() {
+	// CI does not pass -short (it runs `just test-audit`); CI=true also forces the guard on.
+	if testing.Short() && os.Getenv("CI") == "" {
 		t.Skip("type-checks the whole server package from source (~30s)")
 	}
 	fs := token.NewFileSet()
@@ -105,5 +109,24 @@ func TestLogWarnKeepsFieldsStructured(t *testing.T) {
 	}
 	if got[0].ContextMap()["region"] != "us-east" {
 		t.Fatalf("field lost: %+v", got[0].ContextMap())
+	}
+}
+
+// Both the "source" field (runtime.Caller) and zap's own caller must name the
+// line that called LogWarn/LogError, not the helper that forwards to the logger.
+func TestLogHelpersReportTheCallSite(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	rl := NewRuntimeGoLogger(zap.New(core, zap.AddCaller()))
+
+	_, thisFile, line, _ := goruntime.Caller(0)
+	LogWarn(rl, "warn-msg", zap.String("k", "v"))   // line+1
+	LogError(rl, "error-msg", zap.String("k", "v")) // line+2
+
+	for i, level := range []zapcore.Level{zapcore.WarnLevel, zapcore.ErrorLevel} {
+		entries := logs.FilterLevelExact(level).All()
+		require.Len(t, entries, 1)
+		want := fmt.Sprintf("%s:%d", thisFile, line+1+i)
+		require.Equal(t, want, fmt.Sprintf("%s:%d", entries[0].Caller.File, entries[0].Caller.Line), "%s zap caller", level)
+		require.Equal(t, want, entries[0].ContextMap()["source"], "%s source field", level)
 	}
 }
