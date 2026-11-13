@@ -434,8 +434,6 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 		}
 	}
 
-	logGameServerRegistered(logger, config, pingRTT, pingAttempts, hasNoValidation)
-
 	// Monitor the game server and create new parking matches as needed.
 	go func() {
 		// Create the initial parking match for the game server.
@@ -511,10 +509,18 @@ func (p *EvrPipeline) gameserverRegistrationRequest(logger *zap.Logger, session 
 	if err != nil {
 		logger.Warn("Failed to create protobuf registration success message", zap.Error(err))
 		// Fall back to legacy only
-		return session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+		if err := session.SendEvrUnrequire(evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP)); err != nil {
+			return err
+		}
+		logGameServerRegistered(logger, config, pingRTT, pingAttempts, hasNoValidation)
+		return nil
 	}
 
-	return session.SendEvrUnrequire(protobufMsg, evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP))
+	if err := session.SendEvrUnrequire(protobufMsg, evr.NewBroadcasterRegistrationSuccess(config.ServerID, config.Endpoint.ExternalIP)); err != nil {
+		return err
+	}
+	logGameServerRegistered(logger, config, pingRTT, pingAttempts, hasNoValidation)
+	return nil
 }
 
 // applyRegistrationMessage overlays the registration message onto the session
@@ -1041,21 +1047,29 @@ func checkNativeServerVersion(version string) error {
 }
 
 // logGameServerRegistered records one Info line for every successful game server
-// registration, validated or not. Before it, a validated registration logged
-// nothing at all, so "when did this server register, from where, and how long did
-// the ping take" had no record. pingAttempts is how many healthchecks it took
-// (0 when validation was skipped); the endpoints are keyed separately from the
-// internal_ip/external_ip/port fields the caller's logger already carries, so the
-// line never repeats a key.
+// registration, validated or not, once the success reply has been sent. Before it,
+// a validated registration logged nothing at all, so "when did this server
+// register, from where, and how long did the ping take" had no record.
+// pingAttempts is how many healthchecks it took (0 when validation was skipped).
+// The endpoints carry the port; the caller's logger already has a "port" field, so
+// none is added here and the line never repeats a key. The initial parking match is
+// created asynchronously and can still fail after this line.
 func logGameServerRegistered(logger *zap.Logger, config *GameServerPresence, pingRTT time.Duration, pingAttempts int, validationSkipped bool) {
 	logger.Info("Game server registered",
 		zap.Uint64("server_id", config.ServerID),
 		zap.String("operator_id", config.OperatorID.String()),
-		zap.String("internal_endpoint", fmt.Sprintf("%s:%d", config.Endpoint.InternalIP, config.Endpoint.Port)),
-		zap.String("external_endpoint", fmt.Sprintf("%s:%d", config.Endpoint.ExternalIP, config.Endpoint.Port)),
-		zap.Uint16("port", config.Endpoint.Port),
+		zap.String("internal_endpoint", endpointString(config.Endpoint.InternalIP, config.Endpoint.Port)),
+		zap.String("external_endpoint", endpointString(config.Endpoint.ExternalIP, config.Endpoint.Port)),
 		zap.Duration("ping_rtt", pingRTT),
 		zap.Int("ping_attempts", pingAttempts),
 		zap.Bool("validation_skipped", validationSkipped),
 	)
+}
+
+// endpointString is ip:port, or "" when there is no ip (a nil net.IP prints "<nil>").
+func endpointString(ip net.IP, port uint16) string {
+	if ip == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", ip, port)
 }

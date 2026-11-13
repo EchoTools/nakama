@@ -28,7 +28,9 @@ func registeredLogFixture() *GameServerPresence {
 // ping took and how many tries it needed.
 func TestLogGameServerRegistered_Validated(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
-	logGameServerRegistered(zap.New(core), registeredLogFixture(), 37*time.Millisecond, 2, false)
+	// The handler's logger already carries these (evr_pipeline_gameserver.go logger.With).
+	logger := zap.New(core).With(zap.String("internal_ip", "10.0.0.5"), zap.String("external_ip", "203.0.113.9"), zap.Uint16("port", 6792))
+	logGameServerRegistered(logger, registeredLogFixture(), 37*time.Millisecond, 2, false)
 
 	entries := logs.FilterMessage("Game server registered").All()
 	if len(entries) != 1 {
@@ -38,13 +40,22 @@ func TestLogGameServerRegistered_Validated(t *testing.T) {
 	if e.Level != zapcore.InfoLevel {
 		t.Errorf("level = %v, want info", e.Level)
 	}
+	// No key may appear twice on the line (context fields + the line's own).
+	seen := map[string]int{}
+	for _, field := range e.Context {
+		seen[field.Key]++
+	}
+	for k, n := range seen {
+		if n > 1 {
+			t.Errorf("key %q appears %d times", k, n)
+		}
+	}
 	f := e.ContextMap()
 	want := map[string]any{
 		"server_id":          uint64(4242),
 		"operator_id":        "eeeeeeee-0000-0000-0000-00000000000e",
 		"internal_endpoint":  "10.0.0.5:6792",
 		"external_endpoint":  "203.0.113.9:6792",
-		"port":               uint16(6792),
 		"ping_rtt":           37 * time.Millisecond,
 		"ping_attempts":      int64(2),
 		"validation_skipped": false,
@@ -66,6 +77,18 @@ func TestLogGameServerRegistered_ValidationSkipped(t *testing.T) {
 	}
 	f := entries[0].ContextMap()
 	if f["validation_skipped"] != true || f["ping_attempts"] != int64(0) {
+		t.Errorf("fields = %v", f)
+	}
+}
+
+// A server with no internal address logs an empty internal endpoint, not "<nil>:port".
+func TestLogGameServerRegistered_NoInternalIP(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	cfg := registeredLogFixture()
+	cfg.Endpoint.InternalIP = nil
+	logGameServerRegistered(zap.New(core), cfg, time.Millisecond, 1, false)
+	f := logs.FilterMessage("Game server registered").All()[0].ContextMap()
+	if f["internal_endpoint"] != "" || f["external_endpoint"] != "203.0.113.9:6792" {
 		t.Errorf("fields = %v", f)
 	}
 }
