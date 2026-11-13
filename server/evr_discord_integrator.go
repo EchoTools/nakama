@@ -58,6 +58,11 @@ type DiscordIntegrator struct {
 	queueCooldowns     *MapOf[QueueEntry, time.Time]
 	idcache            *MapOf[string, string]
 	memberCache        *MapOf[string, cachedMember]
+	// unreachableGuilds holds guild ids Discord answered 10004 (Unknown Guild)
+	// for: the bot is no longer in them. syncMember skips them instead of asking
+	// Discord once per member. In memory only; cleared by resetUnreachableGuilds
+	// on each full refresh (the prune tick) and by restart.
+	unreachableGuilds sync.Map
 	// guildGroupMemberRemoveFn replaces the external removal boundary in focused tests.
 	guildGroupMemberRemoveFn func(context.Context, string, string, string) error
 
@@ -243,6 +248,10 @@ func (c *DiscordIntegrator) Start() {
 				// Adjust the prune ticker to run every 15 minutes after the first run.
 
 				pruneTicker.Reset(time.Minute * 15)
+
+				// The prune tick is the integrator's full refresh: let guilds
+				// marked unreachable be checked again.
+				c.resetUnreachableGuilds()
 
 				// Prune the guild groups. Read the settings once: they are
 				// swapped atomically, and three separate reads could mix two
@@ -515,10 +524,19 @@ func syncGuildMembersAndReloadGroups(ctx context.Context, logger *zap.Logger, di
 	return reloadGroups()
 }
 
+// resetUnreachableGuilds forgets every guild marked unreachable so the next
+// sync asks Discord about it again.
+func (c *DiscordIntegrator) resetUnreachableGuilds() {
+	c.unreachableGuilds.Clear()
+}
+
 // Syncs a user to all of their guilds.
 func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, discordID, guildID string, full bool) error {
 	if guildID == "" {
 		return errors.New("guild not specified")
+	}
+	if _, unreachable := c.unreachableGuilds.Load(guildID); unreachable {
+		return nil
 	}
 	groupID := c.GuildIDToGroupID(guildID)
 	if groupID == "" {
@@ -550,6 +568,14 @@ func (c *DiscordIntegrator) syncMember(ctx context.Context, logger *zap.Logger, 
 			return fmt.Errorf("failed to remove guild group member: %w", removeErr)
 		}
 		logger.Info("Member not found, removed from guild group", zap.String("discord_id", discordID), zap.String("guild_id", guildID))
+		return nil
+	}
+	if err != nil && IsDiscordErrorCode(err, discordgo.ErrCodeUnknownGuild) {
+		// The bot is no longer in this guild. Remember that, say so once, and
+		// skip the guild until the next full refresh.
+		if _, already := c.unreachableGuilds.LoadOrStore(guildID, struct{}{}); !already {
+			logger.Warn("Guild is unreachable (Discord 10004 Unknown Guild); skipping member sync for it until the next refresh", zap.String("guild_id", guildID), zap.String("group_id", groupID))
+		}
 		return nil
 	}
 	if err != nil {
