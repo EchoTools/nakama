@@ -13,7 +13,7 @@ import (
 )
 
 type deviceAuthIssueEnv struct {
-	nk     *RuntimeGoNakamaModule
+	nk     *revocationTestNK
 	key    []byte
 	logger runtime.Logger
 	cfg    Config
@@ -25,7 +25,10 @@ func newDeviceAuthIssueEnv(t *testing.T) *deviceAuthIssueEnv {
 	cfg := NewConfig(zl)
 	cfg.GetSession().EncryptionKey = "device-auth-issue-test-key"
 	return &deviceAuthIssueEnv{
-		nk:     &RuntimeGoNakamaModule{config: cfg, sessionCache: NewLocalSessionCache(3_600, 7_200)},
+		nk: &revocationTestNK{
+			RuntimeGoNakamaModule: &RuntimeGoNakamaModule{config: cfg, sessionCache: NewLocalSessionCache(3_600, 7_200)},
+			store:                 newOCCTestNakamaModule(),
+		},
 		key:    []byte(cfg.GetSession().EncryptionKey),
 		logger: NewRuntimeGoLogger(zl),
 		cfg:    cfg,
