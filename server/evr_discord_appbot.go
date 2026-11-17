@@ -4787,12 +4787,13 @@ func (d *DiscordAppBot) presentRegionFallbackOptions(s *discordgo.Session, i *di
 		},
 	}
 
-	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Embeds: []*discordgo.MessageEmbed{embed},
-		},
+	// The command handler already acknowledged the interaction with a deferred
+	// response, so deliver the card by editing that response. A second
+	// InteractionRespond is rejected by Discord with 40060.
+	_, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Embeds: &[]*discordgo.MessageEmbed{embed},
 	})
+	return err
 }
 
 // getSkipDeferredACKCommands returns a map of command names that should skip sending a deferred response.
