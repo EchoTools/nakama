@@ -1797,8 +1797,28 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	}
 
 	playerSessionIDs := make([]string, 0, len(state.presenceMap))
+	var spectators, moderators int
 	for _, presence := range state.presenceMap {
 		playerSessionIDs = append(playerSessionIDs, presence.GetSessionId())
+		switch {
+		case presence.IsSpectator():
+			spectators++
+		case presence.IsModerator():
+			moderators++
+		}
+	}
+	// Every session still here is disconnected by the termination task. Say who
+	// they were: the forced-drain warning in MatchLoop gives only a count, and a
+	// spectator left at the deadline (#763) looks the same as a stuck player
+	// there. The breakdown is logged here, not on that warning, because that
+	// warning sits inside the lifecycle block MatchLoop marks do-not-modify.
+	if len(playerSessionIDs) > 0 {
+		logger.WithFields(map[string]any{
+			"remaining_sessions": len(playerSessionIDs),
+			"players":            len(playerSessionIDs) - spectators - moderators,
+			"spectators":         spectators,
+			"moderators":         moderators,
+		}).Warn("Terminating with sessions still present; disconnecting them.")
 	}
 
 	// The game server's session is deliberately not handed to the task. It is
