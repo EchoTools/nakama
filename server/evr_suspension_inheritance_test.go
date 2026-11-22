@@ -2,7 +2,13 @@ package server
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +16,7 @@ import (
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/atomic"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -272,28 +279,6 @@ func TestGuildGroupRegistry_InheritanceFiltersNilSafe(t *testing.T) {
 	}
 }
 
-// A guild admin saves the filters through GuildGroupUpdateRPC. A filter that
-// could not have been meant is refused before anything is written.
-func TestGuildGroupUpdateRPC_RejectsInvalidInheritanceFilter(t *testing.T) {
-	ownerCtx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "owner-uid") //nolint:staticcheck // SA1029: key type is dictated by the runtime API
-	nk, gid := newRulesRPCFixture(t, "")
-
-	for name, md := range map[string]string{
-		"unknown scope":            `{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"scope":"bogus"}}}`,
-		"negative minimum":         `{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"minimum_duration_seconds":-5}}}`,
-		"filter without a link":    `{"suspension_inheritance_filters":{"` + inhSrc + `":{"scope":"full_bans"}}}`,
-		"filter on the wrong link": `{"suspension_inheritence_group_ids":["` + inhOther + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"scope":"full_bans"}}}`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := GuildGroupUpdateRPC(ownerCtx, newCaptureLogger(), nil, nk, `{"group_id":"`+gid+`","metadata":`+md+`}`)
-			rerr, ok := err.(*runtime.Error)
-			if !ok || rerr.Code != 3 {
-				t.Fatalf("err = %#v, want runtime error code 3 (invalid argument)", err)
-			}
-		})
-	}
-}
-
 // guildListNakama lists its guild groups to the registry's rebuild and serves
 // their state objects from the shared storage double.
 type guildListNakama struct {
@@ -350,31 +335,173 @@ func TestRebuildGuildGroups_CarriesStoredInheritanceFilters(t *testing.T) {
 	}
 }
 
-// A guild admin saves a filter through the RPC as the client sends it; once
-// stored, the guild group and the registry both see it.
-func TestGuildGroupUpdateRPC_ValidFilterReachesGuildGroupAndRegistry(t *testing.T) {
-	ownerCtx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "owner-uid") //nolint:staticcheck // SA1029: key type is dictated by the runtime API
-	nk, gid := newRulesRPCFixture(t, "")
+// groupWriteNakama is the guild group GuildGroupUpdateRPC writes to: it records
+// GroupUpdate calls and applies them to the group the RPC reads back.
+type groupWriteNakama struct {
+	*rulesRPCNakama
+	groupUpdates int
+}
 
-	prevSave := saveGroupMetadata
-	t.Cleanup(func() { saveGroupMetadata = prevSave })
-	var saved int
-	saveGroupMetadata = func(_ context.Context, _ runtime.NakamaModule, groupID string, md *GroupMetadata) error {
-		saved++
-		b, err := json.Marshal(md) // what GroupMetadataSave writes to the groups table
-		nk.group.Metadata = string(b)
-		return err
+func (n *groupWriteNakama) GroupUpdate(_ context.Context, _, _, name, _, _, description, avatarURL string, open bool, _ map[string]any, _ int) error {
+	n.groupUpdates++
+	if name != "" {
+		n.group.Name = name
 	}
+	if description != "" {
+		n.group.Description = description
+	}
+	if avatarURL != "" {
+		n.group.AvatarUrl = avatarURL
+	}
+	n.group.Open = wrapperspb.Bool(open)
+	return nil
+}
 
-	payload := `{"group_id":"` + gid + `","metadata":{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"minimum_duration_seconds":604800,"scope":"full_bans"}}}}`
-	if _, err := GuildGroupUpdateRPC(ownerCtx, newCaptureLogger(), nil, nk, payload); err != nil {
+// groupsTableConnector stands in for the groups table GroupMetadataSave reads
+// and writes: SELECT metadata returns *metadata, UPDATE stores its first
+// argument there, so the real GroupMetadataSave runs with no database.
+type groupsTableConnector struct {
+	metadata *string
+	updates  int
+}
+
+func (c *groupsTableConnector) Connect(context.Context) (driver.Conn, error) {
+	return groupsTableConn{c}, nil
+}
+func (c *groupsTableConnector) Driver() driver.Driver { return nil }
+
+type groupsTableConn struct{ t *groupsTableConnector }
+
+func (c groupsTableConn) Prepare(query string) (driver.Stmt, error) {
+	return groupsTableStmt{c.t, query}, nil
+}
+func (groupsTableConn) Close() error              { return nil }
+func (groupsTableConn) Begin() (driver.Tx, error) { return nil, driver.ErrSkip }
+
+type groupsTableStmt struct {
+	t     *groupsTableConnector
+	query string
+}
+
+func (groupsTableStmt) Close() error  { return nil }
+func (groupsTableStmt) NumInput() int { return -1 }
+func (s groupsTableStmt) Exec(args []driver.Value) (driver.Result, error) {
+	if !strings.HasPrefix(s.query, "UPDATE groups SET") {
+		return nil, errors.New("unexpected exec: " + s.query)
+	}
+	s.t.updates++
+	*s.t.metadata = args[0].(string)
+	return driver.RowsAffected(1), nil
+}
+func (s groupsTableStmt) Query([]driver.Value) (driver.Rows, error) {
+	if !strings.HasPrefix(s.query, "SELECT metadata FROM groups") {
+		return nil, errors.New("unexpected query: " + s.query)
+	}
+	return &groupsTableRows{value: *s.t.metadata}, nil
+}
+
+type groupsTableRows struct {
+	value string
+	done  bool
+}
+
+func (r *groupsTableRows) Columns() []string { return []string{"metadata"} }
+func (r *groupsTableRows) Close() error      { return nil }
+func (r *groupsTableRows) Next(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+	r.done = true
+	dest[0] = r.value
+	return nil
+}
+
+// newGroupWriteFixture is a guild group whose stored metadata is `stored`, and
+// a metadata save that goes through the real GroupMetadataSave against a stub
+// groups table (what saveGroupMetadata does in production, minus the cast to the
+// real runtime module, which needs a live database).
+func newGroupWriteFixture(t *testing.T, stored string) (*groupWriteNakama, string, *groupsTableConnector) {
+	t.Helper()
+	base, gid := newRulesRPCFixture(t, "old rules")
+	nk := &groupWriteNakama{rulesRPCNakama: base}
+	if stored != "" {
+		nk.group.Metadata = stored
+	}
+	table := &groupsTableConnector{metadata: &nk.group.Metadata}
+	db := sql.OpenDB(table)
+	t.Cleanup(func() { db.Close() })
+
+	prev := saveGroupMetadata
+	t.Cleanup(func() { saveGroupMetadata = prev })
+	saveGroupMetadata = func(ctx context.Context, _ runtime.NakamaModule, groupID string, md *GroupMetadata) error {
+		return GroupMetadataSave(ctx, db, groupID, md)
+	}
+	return nk, gid, table
+}
+
+var inhOwnerCtx = context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "owner-uid") //nolint:staticcheck // SA1029: key type is dictated by the runtime API
+
+// A guild admin saves the filters through GuildGroupUpdateRPC. A request that
+// could not have been meant is refused before anything is written: the group
+// keeps its name, description, avatar, open flag, rules and metadata.
+func TestGuildGroupUpdateRPC_RejectsInvalidRequestWithoutWriting(t *testing.T) {
+	const groupFields = `"name":"renamed","description":"new desc","avatar_url":"http://x/y.png","open":true,"rules_text":"new rules",`
+	badFilter := func(f string) string {
+		return `"metadata":{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":` + f + `}}`
+	}
+	cases := map[string]string{
+		"unknown scope":            badFilter(`{"scope":"bogus"}`),
+		"negative minimum":         badFilter(`{"minimum_duration_seconds":-5}`),
+		"filter without a link":    `"metadata":{"suspension_inheritance_filters":{"` + inhSrc + `":{"scope":"full_bans"}}}`,
+		"filter on the wrong link": `"metadata":{"suspension_inheritence_group_ids":["` + inhOther + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"scope":"full_bans"}}}`,
+		"rules text too long":      `"metadata":{"minimum_discord_account_age_days":9},"rules_text":"` + strings.Repeat("x", maxGuildRulesTextLen+1) + `"`,
+	}
+	for name, tail := range cases {
+		t.Run(name, func(t *testing.T) {
+			nk, gid, table := newGroupWriteFixture(t, "")
+			beforeMeta := nk.group.Metadata
+			beforeGroup := fmt.Sprintf("%s|%s|%s|%v", nk.group.Name, nk.group.Description, nk.group.AvatarUrl, nk.group.Open.GetValue())
+
+			payload := `{"group_id":"` + gid + `",` + groupFields + tail + `}`
+			if name == "rules text too long" {
+				payload = `{"group_id":"` + gid + `","name":"renamed","description":"new desc",` + tail + `}`
+			}
+			_, err := GuildGroupUpdateRPC(inhOwnerCtx, newCaptureLogger(), nil, nk, payload)
+			rerr, ok := err.(*runtime.Error)
+			if !ok || rerr.Code != 3 {
+				t.Fatalf("err = %#v, want runtime error code 3 (invalid argument)", err)
+			}
+			if nk.groupUpdates != 0 || table.updates != 0 {
+				t.Fatalf("refused request wrote: GroupUpdate %d, metadata saves %d", nk.groupUpdates, table.updates)
+			}
+			if got := fmt.Sprintf("%s|%s|%s|%v", nk.group.Name, nk.group.Description, nk.group.AvatarUrl, nk.group.Open.GetValue()); got != beforeGroup {
+				t.Fatalf("group name|description|avatar|open changed to %q, was %q", got, beforeGroup)
+			}
+			if nk.group.Metadata != beforeMeta {
+				t.Fatalf("metadata changed: %s", nk.group.Metadata)
+			}
+			if got := storedRules(t, nk.rulesRPCNakama, gid); got != "old rules" {
+				t.Fatalf("rules text changed to %q", got)
+			}
+		})
+	}
+}
+
+// A guild admin saves a filter through the RPC as the client sends it; it goes
+// through GroupMetadataSave, and once stored the guild group and the registry
+// both see it.
+func TestGuildGroupUpdateRPC_ValidFilterReachesGuildGroupAndRegistry(t *testing.T) {
+	nk, gid, table := newGroupWriteFixture(t, "")
+
+	payload := `{"group_id":"` + gid + `","name":"renamed","metadata":{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"minimum_duration_seconds":604800,"scope":"full_bans"}}}}`
+	if _, err := GuildGroupUpdateRPC(inhOwnerCtx, newCaptureLogger(), nil, nk, payload); err != nil {
 		t.Fatalf("rpc: %v", err)
 	}
-	if saved != 1 {
-		t.Fatalf("metadata saved %d times, want 1", saved)
+	if table.updates != 1 || nk.groupUpdates != 1 {
+		t.Fatalf("metadata saves %d, GroupUpdate %d, want 1 each", table.updates, nk.groupUpdates)
 	}
 
-	gg, err := GuildGroupLoad(ownerCtx, nk, gid)
+	gg, err := GuildGroupLoad(inhOwnerCtx, nk, gid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +511,43 @@ func TestGuildGroupUpdateRPC_ValidFilterReachesGuildGroupAndRegistry(t *testing.
 
 	// The registry rebuilt from the same stored group reaches the same answer.
 	r := newRebuiltRegistry(t, map[string]string{gid: nk.group.Metadata})
-	if f := r.InheritanceFilters().For(inhSrc, gid); f.Scope != InheritScopeFullBans {
+	if f := r.InheritanceFilters().For(inhSrc, gid); f.MinimumDurationSeconds != 604800 || f.Scope != InheritScopeFullBans {
 		t.Fatalf("registry filter = %+v", f)
+	}
+}
+
+// req.Metadata replaces the stored metadata whole, so the filters need their own
+// rule: a client that saves without the key keeps them, and one that sends the
+// key, even empty or null, replaces them.
+func TestGuildGroupUpdateRPC_InheritanceFiltersOmittedKeptEmptyCleared(t *testing.T) {
+	stored := `{"guild_id":"222","owner_id":"owner-uid","suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"minimum_duration_seconds":604800,"scope":"full_bans"}}}`
+	link := `"suspension_inheritence_group_ids":["` + inhSrc + `"]`
+	cases := []struct {
+		name, metadata string
+		want           SuspensionInheritanceFilter
+	}{
+		{"omitted keeps", `{` + link + `,"minimum_discord_account_age_days":5}`, SuspensionInheritanceFilter{MinimumDurationSeconds: 604800, Scope: InheritScopeFullBans}},
+		{"empty object clears", `{` + link + `,"suspension_inheritance_filters":{}}`, SuspensionInheritanceFilter{}},
+		{"null clears", `{` + link + `,"suspension_inheritance_filters":null}`, SuspensionInheritanceFilter{}},
+		{"replaced", `{` + link + `,"suspension_inheritance_filters":{"` + inhSrc + `":{"scope":"all"}}}`, SuspensionInheritanceFilter{Scope: InheritScopeAll}},
+		{"omitted with the link dropped drops the filter", `{"minimum_discord_account_age_days":5}`, SuspensionInheritanceFilter{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nk, gid, table := newGroupWriteFixture(t, stored)
+			if _, err := GuildGroupUpdateRPC(inhOwnerCtx, newCaptureLogger(), nil, nk, `{"group_id":"`+gid+`","metadata":`+c.metadata+`}`); err != nil {
+				t.Fatalf("rpc: %v", err)
+			}
+			if table.updates != 1 {
+				t.Fatalf("metadata saves = %d, want 1", table.updates)
+			}
+			gg, err := GuildGroupLoad(inhOwnerCtx, nk, gid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := gg.InheritanceFilterFor(inhSrc); got != c.want {
+				t.Fatalf("filter after save = %+v, want %+v (stored %s)", got, c.want, nk.group.Metadata)
+			}
+		})
 	}
 }
