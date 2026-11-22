@@ -153,6 +153,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	// Add suspension record or void existing suspensions
+	var addedRecord *GuildEnforcementRecord
 	if addSuspension {
 		// Get enforcer's Discord ID for audit log
 		enforcerDiscordID := ""
@@ -179,6 +180,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
 		record := journal.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, "", request.RequireCommunityValues, allowPrivateLobbies, false, suspensionDuration, request.ReporterUserID, reporterDiscordID, request.ReportID)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
+		addedRecord = &record
 	} else if voidActiveSuspensions {
 		// Void active suspensions
 		currentGroupID := groupID
@@ -220,6 +222,39 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
+	// Tell the guilds that inherit this suspension (#818). The RPC posts two things
+	// in the issuing guild: the portal-kick card to its enforcement-notice channel
+	// (postKickToSuspensionLog) and the audit line to its audit channel
+	// (sendRPCAuditMessage). The notify is deferred so it runs after both posts and
+	// skips a channel only if the post actually went there; every return path below
+	// reaches it, and it posts asynchronously.
+	//
+	// Known gap: a card whose post outlasts suspensionLogTimeout is reported as not
+	// posted, so an inheriting guild sharing that channel is told too and, if the late
+	// post then lands, sees a second message there.
+	var auditPostedChannelID, noticePostedChannelID string
+	if addedRecord != nil {
+		appBot := globalAppBot.Load()
+		if appBot == nil || appBot.guildGroupRegistry == nil {
+			// The record is saved, but no inheriting guild will hear of it: someone
+			// should look (AGENTS.md log discipline: warn).
+			LogWarn(logger, "Inherited enforcement notices skipped: Discord app bot or guild registry unavailable",
+				zap.String("group_id", groupID), zap.String("target_user_id", targetUserID), zap.String("record_id", addedRecord.ID))
+		} else {
+			src := appBot.guildGroupRegistry.Get(groupID)
+			defer func() {
+				var posted []string
+				if auditPostedChannelID != "" {
+					posted = append(posted, auditPostedChannelID)
+				}
+				if noticePostedChannelID != "" {
+					posted = append(posted, noticePostedChannelID)
+				}
+				appBot.notifyInheritingGuilds(ctx, RuntimeLoggerToZapLogger(logger), src, *addedRecord, targetUserID, "", posted)
+			}()
+		}
+	}
+
 	// Kick the player from active sessions
 	if kickPlayer {
 		// Kick the player from matches belonging to this guild. Sessions stay
@@ -257,6 +292,9 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	// The post is bounded by suspensionLogTimeout, so a slow Discord delays the response
 	// and the audit message by at most that long.
 	response.PostedToSuspensionLog = postKickToSuspensionLog(ctx, logger, nk, request, gg, enforcerUserID, targetUserID, kickPlayer, recordsByGroupID, voids)
+	if response.PostedToSuspensionLog {
+		noticePostedChannelID = gg.EnforcementNoticeChannelID
+	}
 
 	responseData, err := json.Marshal(response)
 	if err != nil {
@@ -264,7 +302,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 
-	sendRPCAuditMessage(
+	auditPostedChannelID = sendRPCAuditMessage(
 		ctx,
 		logger,
 		nk,

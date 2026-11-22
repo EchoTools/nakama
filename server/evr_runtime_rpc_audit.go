@@ -36,9 +36,13 @@ func isNumericID(value string) bool {
 	return true
 }
 
-func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, rpcID, groupID, callerUserID, details string) {
+// sendRPCAuditMessage records an RPC invocation in the audit trail. It returns the
+// guild audit channel the line was actually posted to, "" when it posted none (no
+// Discord session, no guild, no channel configured, or the post failed), so a
+// caller can tell who has already seen the line there.
+func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, rpcID, groupID, callerUserID, details string) string {
 	if rpcID == "" {
-		return
+		return ""
 	}
 
 	// Persist the audit entry to MongoDB if this is a guild-scoped action.
@@ -63,7 +67,7 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 
 	appBot := globalAppBot.Load()
 	if appBot == nil || appBot.dg == nil {
-		return
+		return ""
 	}
 
 	actor := rpcAuditActor(ctx, nk, callerUserID)
@@ -76,17 +80,19 @@ func sendRPCAuditMessage(ctx context.Context, logger runtime.Logger, nk runtime.
 		if gg, err := GuildGroupLoad(ctx, nk, groupID); err == nil && gg != nil {
 			if _, err := AuditLogSendGuild(appBot.dg, gg, content); err != nil {
 				logger.WithFields(map[string]interface{}{"rpc_id": rpcID, "error": err}).Warn("Failed to send guild RPC audit log")
+				return ""
 			}
-			return
+			return gg.AuditChannelID
 		}
 	}
 
 	svcSettings := ServiceSettings()
 	if svcSettings == nil || svcSettings.ServiceAuditChannelID == "" {
-		return
+		return ""
 	}
 
 	if err := AuditLogSend(appBot.dg, svcSettings.ServiceAuditChannelID, content); err != nil {
 		logger.WithFields(map[string]interface{}{"rpc_id": rpcID, "error": err}).Warn("Failed to send service RPC audit log")
 	}
+	return ""
 }

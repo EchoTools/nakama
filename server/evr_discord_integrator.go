@@ -54,10 +54,14 @@ type DiscordIntegrator struct {
 	dg *discordgo.Session
 
 	guildGroupRegistry *GuildGroupRegistry
-	queueCh            chan QueueEntry
-	queueCooldowns     *MapOf[QueueEntry, time.Time]
-	idcache            *MapOf[string, string]
-	memberCache        *MapOf[string, cachedMember]
+	// sendChannelMessageFn replaces the Discord channel post in focused tests.
+	sendChannelMessageFn func(channelID string, msg *discordgo.MessageSend) error
+	// noticeWG tracks in-flight inherited enforcement notices (#818).
+	noticeWG       sync.WaitGroup
+	queueCh        chan QueueEntry
+	queueCooldowns *MapOf[QueueEntry, time.Time]
+	idcache        *MapOf[string, string]
+	memberCache    *MapOf[string, cachedMember]
 	// unreachableGuilds holds guild ids Discord answered 10004 (Unknown Guild)
 	// for: the bot is no longer in them. syncMember skips them instead of asking
 	// Discord once per member. In memory only; cleared by resetUnreachableGuilds
@@ -1445,7 +1449,7 @@ func (d *DiscordIntegrator) writeGuildBanEnforcement(ctx context.Context, logger
 
 	// Lifetime suspension scoped to the banning guild. AllowPrivateLobbies=false
 	// ensures the suspension covers all modes (public and private lobbies).
-	journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID,
+	record := journal.AddRecord(groupID, enforcerUserID, enforcerDiscordID,
 		guildBanEnforcementNotice, reason,
 		false, // requireCommunityValues
 		false, // allowPrivateLobbies: false -> blocks ALL modes
@@ -1453,6 +1457,15 @@ func (d *DiscordIntegrator) writeGuildBanEnforcement(ctx context.Context, logger
 
 	if err := SyncJournalAndProfileWithRetry(ctx, d.nk, userID, journal); err != nil {
 		return fmt.Errorf("writeGuildBanEnforcement: failed to persist enforcement journal: %w", err)
+	}
+
+	// Tell the guilds that inherit this lifetime ban (#818). The ban posts no
+	// notice in the banning guild (Discord shows its own), so nothing is skipped.
+	if d.guildGroupRegistry != nil {
+		notifyInheritingGuildsAsync(ctx, logger, d.nk, d.guildGroupRegistry, func(channelID string, msg *discordgo.MessageSend) error {
+			return postChannelMessage(d.dg, d.sendChannelMessageFn, channelID, msg)
+		}, &d.noticeWG,
+			d.guildGroupRegistry.Get(groupID), record, userID, "", nil)
 	}
 
 	return nil

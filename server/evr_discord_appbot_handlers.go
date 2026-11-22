@@ -978,6 +978,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		if i == nil {
 			return errors.New(content)
 		}
+		if d.dg == nil {
+			return errors.New("discord session is nil")
+		}
 		if i.Type == discordgo.InteractionApplicationCommand {
 			return editInteractionResponse(d.dg, i, content)
 		}
@@ -987,6 +990,9 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 	respondEmbed := func(embeds []*discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
 		if i == nil {
 			return nil
+		}
+		if d.dg == nil {
+			return errors.New("discord session is nil")
 		}
 		if i.Type == discordgo.InteractionApplicationCommand {
 			_, err := d.dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -1067,6 +1073,11 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		return errors.New("You must be a guild enforcer or global operator to use this command")
 	}
 
+	// The channels this handler actually posted this enforcement to (the source
+	// guild's notice, then its audit summary). A guild that inherits it is told
+	// everywhere else, never twice in one of these (#818).
+	var postedChannelIDs []string
+
 	if isEnforcer || isGlobalOperator {
 		// Kick the player if this is not a voiding action
 		if !voidActiveSuspensions {
@@ -1078,6 +1089,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			return fmt.Errorf("failed to read storage: %w", err)
 		}
 
+		var addedRecord *GuildEnforcementRecord
 		if addSuspension {
 			// Add a new record
 			actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
@@ -1085,6 +1097,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			// This enforce flow is operator-initiated, not report-initiated, so no reporter is known.
 			record := journal.AddRecordWithOptions(groupID, callerUserID, caller.User.ID, userNotice, notes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration, "", "", "")
 			recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
+			addedRecord = &record
 
 			// Send DM notification to the user
 			guildName := ""
@@ -1160,6 +1173,17 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 			return fmt.Errorf("failed to write storage: %w", err)
 		}
 
+		// Tell the guilds that inherit this suspension (#818), once the source
+		// guild's own posts below (the notice, the audit summary) are out, failed or
+		// skipped, skipping the channels they actually went to. Deferred so every
+		// return path below reaches it; it posts asynchronously and never holds
+		// this handler.
+		if addedRecord != nil {
+			defer func() {
+				d.notifyInheritingGuilds(ctx, RuntimeLoggerToZapLogger(logger), gg, *addedRecord, targetUserID, target.ID, postedChannelIDs)
+			}()
+		}
+
 		if gg.EnforcementNoticeChannelID != "" {
 			profile, err := EVRProfileLoad(ctx, nk, targetUserID)
 			if err != nil {
@@ -1194,10 +1218,12 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				},
 				Now: time.Now(),
 			})
-			if err := sendEnforcementNotice(ctx, d.dg, gg.EnforcementNoticeChannelID, embed, components); err != nil {
+			if err := sendEnforcementNotice(ctx, channelPoster{dg: d.dg, override: d.sendChannelMessageFn}, gg.EnforcementNoticeChannelID, embed, components); err != nil {
 				logger.WithFields(map[string]interface{}{
 					"error": err,
 				}).Error("Failed to send enforcement notice")
+			} else if gg.EnforcementNoticeChannelID != "" {
+				postedChannelIDs = append(postedChannelIDs, gg.EnforcementNoticeChannelID)
 			}
 			// Send the same embed to the moderator as an ephemeral response
 			if i != nil {
@@ -1294,7 +1320,10 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 		}
 	}
 
-	_, _ = d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), strings.Join(actions, ";\n ")), false)
+	// A nil message means nothing was posted (no audit channel, or the post failed).
+	if auditMsg, err := d.LogAuditMessage(ctx, groupID, fmt.Sprintf("%s's `kick-player` actions summary for %s (%s):\n %s", caller.Mention(), target.Mention(), EscapeDiscordMarkdown(target.Username), strings.Join(actions, ";\n ")), false); err == nil && auditMsg != nil && auditMsg.ChannelID != "" {
+		postedChannelIDs = append(postedChannelIDs, auditMsg.ChannelID)
+	}
 
 	if i != nil && !sentEmbedResponse {
 		return respondContent(fmt.Sprintf("[%d sessions found]%s\n%s", cnt, timeoutMessage, strings.Join(actions, "\n")))
