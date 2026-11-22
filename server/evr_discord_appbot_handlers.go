@@ -1163,7 +1163,7 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				},
 				Now: time.Now(),
 			})
-			if err := sendEnforcementNotice(d.dg, gg.EnforcementNoticeChannelID, embed, components); err != nil {
+			if err := sendEnforcementNotice(ctx, d.dg, gg.EnforcementNoticeChannelID, embed, components); err != nil {
 				logger.WithFields(map[string]interface{}{
 					"error": err,
 				}).Error("Failed to send enforcement notice")

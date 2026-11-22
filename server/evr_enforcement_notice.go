@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -131,7 +132,7 @@ type enforcementNoticeSender interface {
 // sendEnforcementNotice posts the card to the guild's enforcement-notice channel.
 // A guild with no channel configured is not an error: there is nowhere to post.
 // The post goes through the bot, so no webhook URL is ever handled here.
-func sendEnforcementNotice(s enforcementNoticeSender, channelID string, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
+func sendEnforcementNotice(ctx context.Context, s enforcementNoticeSender, channelID string, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) error {
 	if channelID == "" {
 		return nil
 	}
@@ -139,7 +140,7 @@ func sendEnforcementNotice(s enforcementNoticeSender, channelID string, embed *d
 		Embed:           embed,
 		Components:      components,
 		AllowedMentions: &discordgo.MessageAllowedMentions{},
-	}); err != nil {
+	}, discordgo.WithContext(ctx)); err != nil {
 		return fmt.Errorf("sendEnforcementNotice: %w", err)
 	}
 	return nil
@@ -150,14 +151,4 @@ func sendEnforcementNotice(s enforcementNoticeSender, channelID string, embed *d
 // sending "post_to_suspension_log": false.
 func (r EnforcementKickRequest) PostsToSuspensionLog() bool {
 	return r.PostToSuspensionLog == nil || *r.PostToSuspensionLog
-}
-
-// postPortalKickNotice posts the notice for a portal kick unless the caller opted
-// out or the guild has no enforcement-notice channel configured.
-func postPortalKickNotice(s enforcementNoticeSender, req EnforcementKickRequest, gg *GuildGroup, in enforcementNoticeInput) error {
-	if !req.PostsToSuspensionLog() || gg == nil || gg.EnforcementNoticeChannelID == "" {
-		return nil
-	}
-	embed, components := buildEnforcementNotice(in)
-	return sendEnforcementNotice(s, gg.EnforcementNoticeChannelID, embed, components)
 }

@@ -1,13 +1,13 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/heroiclabs/nakama-common/api"
 )
 
 type fakeNoticeSender struct {
@@ -20,12 +20,6 @@ func (f *fakeNoticeSender) ChannelMessageSendComplex(channelID string, data *dis
 	f.channels = append(f.channels, channelID)
 	f.messages = append(f.messages, data)
 	return &discordgo.Message{}, f.err
-}
-
-func noticeGuild(channelID string) *GuildGroup {
-	gg := &GuildGroup{Group: &api.Group{Name: "Test Guild"}}
-	gg.EnforcementNoticeChannelID = channelID
-	return gg
 }
 
 func kickNoticeInput() enforcementNoticeInput {
@@ -64,13 +58,14 @@ func TestEnforcementKickRequest_PostsToSuspensionLog(t *testing.T) {
 	}
 }
 
-func TestPostPortalKickNotice(t *testing.T) {
+func TestSendEnforcementNotice(t *testing.T) {
 	t.Parallel()
 
-	t.Run("default posts to the guild's notice channel", func(t *testing.T) {
+	t.Run("posts to the channel", func(t *testing.T) {
 		t.Parallel()
 		s := &fakeNoticeSender{}
-		if err := postPortalKickNotice(s, EnforcementKickRequest{}, noticeGuild("chan-1"), kickNoticeInput()); err != nil {
+		embed, comps := buildEnforcementNotice(kickNoticeInput())
+		if err := sendEnforcementNotice(context.Background(), s, "chan-1", embed, comps); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(s.channels) != 1 || s.channels[0] != "chan-1" {
@@ -81,22 +76,10 @@ func TestPostPortalKickNotice(t *testing.T) {
 		}
 	})
 
-	t.Run("opt-out posts nothing", func(t *testing.T) {
+	t.Run("no channel posts nothing", func(t *testing.T) {
 		t.Parallel()
 		s := &fakeNoticeSender{}
-		req := EnforcementKickRequest{PostToSuspensionLog: boolPtr(false)}
-		if err := postPortalKickNotice(s, req, noticeGuild("chan-1"), kickNoticeInput()); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(s.channels) != 0 {
-			t.Fatalf("expected no post, got %v", s.channels)
-		}
-	})
-
-	t.Run("guild without a notice channel posts nothing", func(t *testing.T) {
-		t.Parallel()
-		s := &fakeNoticeSender{}
-		if err := postPortalKickNotice(s, EnforcementKickRequest{}, noticeGuild(""), kickNoticeInput()); err != nil {
+		if err := sendEnforcementNotice(context.Background(), s, "", nil, nil); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(s.channels) != 0 {
@@ -107,7 +90,7 @@ func TestPostPortalKickNotice(t *testing.T) {
 	t.Run("send failure is returned", func(t *testing.T) {
 		t.Parallel()
 		s := &fakeNoticeSender{err: errors.New("discord down")}
-		if err := postPortalKickNotice(s, EnforcementKickRequest{}, noticeGuild("chan-1"), kickNoticeInput()); err == nil {
+		if err := sendEnforcementNotice(context.Background(), s, "chan-1", nil, nil); err == nil {
 			t.Fatal("expected the send error to be returned")
 		}
 	})
@@ -115,7 +98,7 @@ func TestPostPortalKickNotice(t *testing.T) {
 	t.Run("mentions are suppressed", func(t *testing.T) {
 		t.Parallel()
 		s := &fakeNoticeSender{}
-		_ = postPortalKickNotice(s, EnforcementKickRequest{}, noticeGuild("chan-1"), kickNoticeInput())
+		_ = sendEnforcementNotice(context.Background(), s, "chan-1", nil, nil)
 		am := s.messages[0].AllowedMentions
 		if am == nil || len(am.Parse) != 0 || len(am.Users) != 0 || len(am.Roles) != 0 {
 			t.Fatalf("expected empty AllowedMentions, got %+v", am)
