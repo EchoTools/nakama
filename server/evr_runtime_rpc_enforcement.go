@@ -27,6 +27,7 @@ type EnforcementKickRequest struct {
 	RequireCommunityValues bool   `json:"require_community_values,omitempty"` // Require the user to accept the community values before they can rejoin
 	ReporterUserID         string `json:"reporter_user_id,omitempty"`         // User ID of the player who filed/reported the action (issue #466; empty for operator-initiated kicks)
 	ReportID               string `json:"report_id,omitempty"`                // ID of a linked PlayerReport (see PlayerReport.ID) this action stems from
+	PostToSuspensionLog    *bool  `json:"post_to_suspension_log,omitempty"`   // Post the action to the guild's suspension log channel (defaults to true; send false to opt out)
 }
 
 // EnforcementKickResponse represents the response from the kick/enforcement RPC
@@ -250,6 +251,8 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		LogError(logger, "Failed to marshal response", zap.Error(err))
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
+
+	postKickToSuspensionLog(ctx, logger, nk, request, gg, enforcerUserID, targetUserID, recordsByGroupID, voids)
 
 	sendRPCAuditMessage(
 		ctx,
@@ -571,4 +574,69 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	return string(responseData), nil
+}
+
+// postKickToSuspensionLog posts the kick to the guild's suspension log channel, the same
+// card the Discord /kick-player command posts. Posting is best effort: the kick has already
+// been applied, so a failure is logged and never fails the RPC.
+func postKickToSuspensionLog(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, request EnforcementKickRequest, gg *GuildGroup, enforcerUserID, targetUserID string, recordsByGroupID map[string][]GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid) {
+	if !request.PostsToSuspensionLog() || gg == nil || gg.EnforcementNoticeChannelID == "" {
+		return
+	}
+	appBot := globalAppBot.Load()
+	if appBot == nil || appBot.dg == nil {
+		LogWarn(logger, "Discord bot unavailable; kick not posted to the suspension log", zap.String("group_id", request.GroupID))
+		return
+	}
+
+	in := enforcementNoticeInput{
+		ActorName:           enforcerUserID,
+		ActorUsername:       enforcerUserID,
+		TargetIGN:           targetUserID,
+		UserNotice:          request.UserNotice,
+		Notes:               request.ModeratorNotes,
+		RestrictNotes:       gg.RestrictEnforcerNoteVisibility,
+		AllowPrivateLobbies: false,
+		GuildID:             gg.GuildID,
+		GroupID:             request.GroupID,
+		RecordsByGroupID:    recordsByGroupID,
+		Voids:               voids,
+		Now:                 time.Now(),
+	}
+	if request.AllowPrivateLobbies != nil {
+		in.AllowPrivateLobbies = *request.AllowPrivateLobbies
+	} else {
+		in.AllowPrivateLobbies = gg.GetKickPlayerAllowPrivates()
+	}
+	in.GroupName = func(groupID string) string {
+		if appBot.guildGroupRegistry == nil {
+			return ""
+		}
+		if g := appBot.guildGroupRegistry.Get(groupID); g != nil {
+			return g.Name()
+		}
+		return ""
+	}
+	if account, err := nk.AccountGetId(ctx, enforcerUserID); err != nil {
+		LogWarn(logger, "Failed to load enforcer account for suspension log", zap.Error(err), zap.String("enforcer_user_id", enforcerUserID))
+	} else if account != nil {
+		in.ActorDiscordID = account.CustomId
+		if account.User != nil {
+			in.ActorUsername = account.User.Username
+			in.ActorName = account.User.DisplayName
+			if in.ActorName == "" {
+				in.ActorName = account.User.Username
+			}
+		}
+	}
+	if profile, err := EVRProfileLoad(ctx, nk, targetUserID); err != nil {
+		LogWarn(logger, "Failed to load target profile for suspension log", zap.Error(err), zap.String("target_user_id", targetUserID))
+	} else {
+		in.TargetIGN = profile.GetGroupIGN(request.GroupID)
+		in.TargetDiscordID = profile.DiscordID()
+	}
+
+	if err := postPortalKickNotice(appBot.dg, request, gg, in); err != nil {
+		LogWarn(logger, "Failed to post kick to the suspension log", zap.Error(err), zap.String("group_id", request.GroupID))
+	}
 }
