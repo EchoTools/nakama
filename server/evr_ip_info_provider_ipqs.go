@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -186,6 +187,9 @@ type IPQSClient struct {
 	apiKey     string
 	parameters string
 
+	// httpClient performs the lookup; nil means http.DefaultClient.
+	httpClient *http.Client
+
 	mu              sync.Mutex
 	lastFailureTime time.Time
 	backoffDuration time.Duration
@@ -330,15 +334,30 @@ func (s *IPQSClient) Get(ctx context.Context, ip string) (IPInfo, error) {
 
 }
 
+// ipqsCause returns the underlying cause of a *url.Error. The request URL
+// carries the API key as a path segment and net/http copies the URL into the
+// errors it returns, so an error from the request must reach a log line or a
+// returned error only through its cause, never as the *url.Error itself.
+func ipqsCause(err error) error {
+	if ue, ok := errors.AsType[*url.Error](err); ok {
+		return ue.Err
+	}
+	return err
+}
+
 func (s *IPQSClient) retrieve(ctx context.Context, ip string) (*IPQSResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url(ip), nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build request: %w", err)
+		return nil, fmt.Errorf("failed to build request: %w", ipqsCause(err))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := s.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get response: %w", err)
+		return nil, fmt.Errorf("failed to get response: %w", ipqsCause(err))
 	}
 	defer resp.Body.Close()
 
