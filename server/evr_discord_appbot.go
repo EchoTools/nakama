@@ -96,6 +96,11 @@ type DiscordAppBot struct {
 	publicMatchBurst         int
 	// Rate limiters for all match creation modes (public, private, social)
 	matchCreateRateLimiters *MapOf[string, *rate.Limiter]
+
+	// sendChannelMessageFn replaces the Discord channel post in focused tests.
+	sendChannelMessageFn func(channelID string, msg *discordgo.MessageSend) error
+	// noticeWG tracks in-flight inherited enforcement notices (#818).
+	noticeWG sync.WaitGroup
 }
 
 func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB, metrics Metrics, pipeline *Pipeline, config Config, discordCache *DiscordIntegrator, statusRegistry StatusRegistry, dg *discordgo.Session, ipInfoCache *IPInfoCache, guildGroupRegistry *GuildGroupRegistry) (*DiscordAppBot, error) {

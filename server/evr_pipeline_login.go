@@ -1801,32 +1801,54 @@ func (p *EvrPipeline) applyGhostSpamSuspension(
 	logger *zap.Logger,
 	targetUserID, operatorUserID, operatorDiscordID, groupID, note string,
 ) {
+	applyGhostSpamSuspension(ctx, logger, p.nk, p.sessionRegistry, p.appBot, targetUserID, operatorUserID, operatorDiscordID, groupID, note)
+}
+
+// applyGhostSpamSuspension is the body of EvrPipeline.applyGhostSpamSuspension
+// with its dependencies passed in, so a test can supply fakes for them.
+func applyGhostSpamSuspension(
+	ctx context.Context,
+	logger *zap.Logger,
+	nk runtime.NakamaModule,
+	sessionRegistry SessionRegistry,
+	appBot *DiscordAppBot,
+	targetUserID, operatorUserID, operatorDiscordID, groupID, note string,
+) {
 	journal := NewGuildEnforcementJournal(targetUserID)
-	if err := StorableRead(ctx, p.nk, targetUserID, journal, false); err != nil {
+	if err := StorableRead(ctx, nk, targetUserID, journal, false); err != nil {
 		logger.Error("Failed to read enforcement journal for ghost spam suspension",
 			zap.String("target_user_id", targetUserID),
 			zap.Error(err))
 		// Continue with empty journal
 	}
 
-	journal.AddRecord(groupID, operatorUserID, operatorDiscordID,
+	record := journal.AddRecord(groupID, operatorUserID, operatorDiscordID,
 		"Automated suspension: repeated ghost spam", note,
 		false, false, GhostSuspendDuration)
 
-	if err := SyncJournalAndProfileWithRetry(ctx, p.nk, targetUserID, journal); err != nil {
+	if err := SyncJournalAndProfileWithRetry(ctx, nk, targetUserID, journal); err != nil {
 		logger.Error("Failed to save ghost spam suspension",
 			zap.String("target_user_id", targetUserID),
 			zap.Error(err))
 		return
 	}
 
-	EnforceGuildSuspension(ctx, logger, p.nk, p.sessionRegistry, targetUserID, []string{groupID})
+	EnforceGuildSuspension(ctx, logger, nk, sessionRegistry, targetUserID, []string{groupID})
 
-	if _, err := p.appBot.LogAuditMessage(ctx, groupID,
+	auditMsg, err := appBot.LogAuditMessage(ctx, groupID,
 		fmt.Sprintf("🚫 **Auto-suspend (1h)**: Enforcer <@%s> ghost-spammed player `%s` — %s",
-			operatorDiscordID, targetUserID, note), false); err != nil {
+			operatorDiscordID, targetUserID, note), false)
+	if err != nil {
 		logger.Warn("Failed to log ghost spam suspension audit", zap.Error(err))
 	}
+
+	// Tell the guilds that inherit this suspension (#818), after the source
+	// guild's own audit line, skipping the channel that line went to.
+	var postedChannelIDs []string
+	if auditMsg != nil && auditMsg.ChannelID != "" {
+		postedChannelIDs = append(postedChannelIDs, auditMsg.ChannelID)
+	}
+	appBot.notifyInheritingGuilds(ctx, logger, appBot.guildGroupRegistry.Get(groupID), record, targetUserID, "", postedChannelIDs)
 }
 
 // applyMuteSpamKick kicks the target from their match (no suspension, no disconnect)

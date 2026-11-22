@@ -153,6 +153,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	}
 
 	// Add suspension record or void existing suspensions
+	var addedRecord *GuildEnforcementRecord
 	if addSuspension {
 		// Get enforcer's Discord ID for audit log
 		enforcerDiscordID := ""
@@ -179,6 +180,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
 		record := journal.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, "", request.RequireCommunityValues, allowPrivateLobbies, false, suspensionDuration, request.ReporterUserID, reporterDiscordID, request.ReportID)
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
+		addedRecord = &record
 	} else if voidActiveSuspensions {
 		// Void active suspensions
 		currentGroupID := groupID
@@ -218,6 +220,31 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	if err := SyncJournalAndProfileWithRetry(ctx, nk, targetUserID, journal); err != nil {
 		LogError(logger, "Failed to write enforcement data", zap.Error(err))
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
+	}
+
+	// Tell the guilds that inherit this suspension (#818). The RPC posts no notice
+	// of its own in the issuing guild, but sendRPCAuditMessage at the end posts to
+	// that guild's audit channel. The notify is deferred so it runs after that post
+	// and skips the channel only if the post actually went there; every return
+	// path below reaches it, and it posts asynchronously.
+	var auditPostedChannelID string
+	if addedRecord != nil {
+		appBot := globalAppBot.Load()
+		if appBot == nil || appBot.guildGroupRegistry == nil {
+			// The record is saved, but no inheriting guild will hear of it: someone
+			// should look (AGENTS.md log discipline: warn).
+			LogWarn(logger, "Inherited enforcement notices skipped: Discord app bot or guild registry unavailable",
+				zap.String("group_id", groupID), zap.String("target_user_id", targetUserID), zap.String("record_id", addedRecord.ID))
+		} else {
+			src := appBot.guildGroupRegistry.Get(groupID)
+			defer func() {
+				var posted []string
+				if auditPostedChannelID != "" {
+					posted = append(posted, auditPostedChannelID)
+				}
+				appBot.notifyInheritingGuilds(ctx, RuntimeLoggerToZapLogger(logger), src, *addedRecord, targetUserID, "", posted)
+			}()
+		}
 	}
 
 	// Kick the player from active sessions
@@ -264,7 +291,7 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to create response", StatusInternalError)
 	}
 
-	sendRPCAuditMessage(
+	auditPostedChannelID = sendRPCAuditMessage(
 		ctx,
 		logger,
 		nk,
