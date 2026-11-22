@@ -22,6 +22,11 @@ type GuildGroupRegistry struct {
 	writeMu        sync.Mutex                              // Mutex to protect writes to the guildGroups map
 	guildGroups    *atomic.Pointer[map[string]*GuildGroup] // map[groupID]GuildGroup
 	inheritanceMap *atomic.Pointer[map[string][]string]    // map[srcGroupID][]dstGroupID
+
+	// inheritanceFilters holds the non-default filter of each inheritance link.
+	// It is nil on a registry built without NewGuildGroupRegistry (test doubles),
+	// which InheritanceFilters reads as "every link inherits everything".
+	inheritanceFilters *atomic.Pointer[InheritanceFilters]
 }
 
 func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, db *sql.DB) *GuildGroupRegistry {
@@ -34,6 +39,8 @@ func NewGuildGroupRegistry(ctx context.Context, logger runtime.Logger, nk runtim
 
 		guildGroups:    atomic.NewPointer(&map[string]*GuildGroup{}),
 		inheritanceMap: atomic.NewPointer(&map[string][]string{}),
+
+		inheritanceFilters: atomic.NewPointer(&InheritanceFilters{}),
 	}
 	// Regularly update the guild groups from the database.
 	go func() {
@@ -79,6 +86,7 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 	var (
 		guildGroups    = make(map[string]*GuildGroup, len(*r.guildGroups.Load()))
 		inheritanceMap = make(map[string][]string, len(guildGroups))
+		filters        = InheritanceFilters{}
 		cursor         string
 	)
 	for {
@@ -106,11 +114,8 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 			// Add the group to the registry.
 			guildGroups[group.Id] = gg
 
-			// Build the inheretence map.
-
-			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
-				inheritanceMap[parentID] = append(inheritanceMap[parentID], group.Id)
-			}
+			// Build the inheritance map and the per-link filters.
+			addInheritanceLinks(group.Id, &gg.GroupMetadata, inheritanceMap, filters)
 		}
 		if cursor == "" {
 			break
@@ -119,11 +124,35 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 	// Update the registry with the new guild groups and inheritance map.
 	r.guildGroups.Store(&guildGroups)
 	r.inheritanceMap.Store(&inheritanceMap)
+	r.inheritanceFilters.Store(&filters)
+}
+
+// addInheritanceLinks records every link the guild inheritingGroupID has to a
+// source guild, and the guild's filter on it when that filter is not the default.
+func addInheritanceLinks(inheritingGroupID string, metadata *GroupMetadata, inheritanceMap map[string][]string, filters InheritanceFilters) {
+	for _, parentID := range metadata.SuspensionInheritanceGroupIDs {
+		inheritanceMap[parentID] = append(inheritanceMap[parentID], inheritingGroupID)
+		if f := metadata.InheritanceFilterFor(parentID); !f.IsDefault() {
+			if filters[parentID] == nil {
+				filters[parentID] = make(map[string]SuspensionInheritanceFilter)
+			}
+			filters[parentID][inheritingGroupID] = f
+		}
+	}
 }
 
 // map[parentGroupID]map[childGroupID]bool
 func (r *GuildGroupRegistry) InheritanceByParentGroupID() map[string][]string {
 	return *r.inheritanceMap.Load()
+}
+
+// InheritanceFilters returns the filter on each inheritance link that has one.
+// Pass it, with InheritanceByParentGroupID, to CheckEnforcementSuspensions.
+func (r *GuildGroupRegistry) InheritanceFilters() InheritanceFilters {
+	if r.inheritanceFilters == nil {
+		return nil
+	}
+	return *r.inheritanceFilters.Load()
 }
 
 func (r *GuildGroupRegistry) GuildGroups() map[string]*GuildGroup {

@@ -83,7 +83,7 @@ func TestCheckEnforcementSuspensions(t *testing.T) {
 		groupB: {},
 	}
 
-	activeEnforcements, err := CheckEnforcementSuspensions(journals, inheritanceMap)
+	activeEnforcements, err := CheckEnforcementSuspensions(journals, inheritanceMap, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestCheckEnforcementSuspensions_VoidInheritedSuspension(t *testing.T) {
 		groupB: {},
 	}
 
-	activeEnforcements, err := CheckEnforcementSuspensions(journals, inheritanceMap)
+	activeEnforcements, err := CheckEnforcementSuspensions(journals, inheritanceMap, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick(t *testing.T) {
 	}
 	inheritanceMap := map[string][]string{groupID: {}}
 
-	staleEnforcements, err := CheckEnforcementSuspensions(loginTimeJournals, inheritanceMap)
+	staleEnforcements, err := CheckEnforcementSuspensions(loginTimeJournals, inheritanceMap, nil)
 	if err != nil {
 		t.Fatalf("unexpected error computing login-time enforcements: %v", err)
 	}
@@ -631,7 +631,7 @@ func TestMidSessionSuspension_StaleEnforcementsMissPostLoginKick(t *testing.T) {
 	// After the fix, lobbyAuthorize re-reads journals from storage at join time.
 	// Simulated here by calling CheckEnforcementSuspensions with the fresh journal.
 	freshJournals := GuildEnforcementJournalList{userID: postKickJournal}
-	freshEnforcements, err := CheckEnforcementSuspensions(freshJournals, inheritanceMap)
+	freshEnforcements, err := CheckEnforcementSuspensions(freshJournals, inheritanceMap, nil)
 	if err != nil {
 		t.Fatalf("unexpected error computing fresh enforcements: %v", err)
 	}

@@ -751,7 +751,7 @@ func (d *DiscordAppBot) handleProfileRequest(ctx context.Context, logger runtime
 		return fmt.Errorf("failed to load enforcement journals: %w", err)
 	}
 	inheritanceMap := d.guildGroupRegistry.InheritanceByParentGroupID()
-	activeSuspensions, err := CheckEnforcementSuspensions(journals, inheritanceMap)
+	activeSuspensions, err := CheckEnforcementSuspensions(journals, inheritanceMap, d.guildGroupRegistry.InheritanceFilters())
 	if err != nil {
 		return fmt.Errorf("failed to check enforcement suspensions: %w", err)
 	}

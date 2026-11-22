@@ -393,11 +393,11 @@ func TestCheckOwnEnforcementSuspensions_ExcludesAlts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	merged, _ := CheckEnforcementSuspensions(journals, nil)
+	merged, _ := CheckEnforcementSuspensions(journals, nil, nil)
 	if got := merged[groupID][evr.ModeArenaPublic].UserID; got != altID {
 		t.Fatalf("premise: merged slot should hold the later-expiring alt record, got %q", got)
 	}
-	own, err := CheckOwnEnforcementSuspensions(userID, journals, nil)
+	own, err := CheckOwnEnforcementSuspensions(userID, journals, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

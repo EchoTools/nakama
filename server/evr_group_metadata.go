@@ -88,6 +88,10 @@ type GroupMetadata struct {
 
 	RestrictEnforcerNoteVisibility bool `json:"restrict_enforcer_note_visibility"` // Enforcers only see notes on their own records; auditors see all
 
+	// SuspensionInheritanceFilters narrows each inheritance link, keyed by source
+	// group ID. A source with no entry is inherited in full.
+	SuspensionInheritanceFilters map[string]SuspensionInheritanceFilter `json:"suspension_inheritance_filters,omitempty"`
+
 	KickPlayerAllowPrivates  *bool    `json:"kick_player_allow_privates"`           // Default allow_privates for /kick-player suspensions (default: true)
 	EnforceEarlyQuitPenalty  *bool    `json:"enforce_early_quit_penalty,omitempty"` // Enforce early quit penalties (default: false)
 	LoadoutCommandUsernames  []string `json:"loadout_command_usernames"`            // Discord usernames allowed to use /loadout (legacy, prefer IDs)

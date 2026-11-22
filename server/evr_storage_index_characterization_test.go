@@ -533,7 +533,7 @@ func TestEnforcementVerdict_StaleIndexEntry_YieldsNotSuspended(t *testing.T) {
 
 	// Ground truth: the user IS suspended.
 	truthEnforcements, err := CheckEnforcementSuspensions(
-		GuildEnforcementJournalList{userID: truth}, map[string][]string{})
+		GuildEnforcementJournalList{userID: truth}, map[string][]string{}, nil)
 	if err != nil {
 		t.Fatalf("CheckEnforcementSuspensions(truth): %v", err)
 	}
@@ -555,7 +555,7 @@ func TestEnforcementVerdict_StaleIndexEntry_YieldsNotSuspended(t *testing.T) {
 		fromIndex[o.UserId] = j
 	}
 
-	indexEnforcements, err := CheckEnforcementSuspensions(fromIndex, map[string][]string{})
+	indexEnforcements, err := CheckEnforcementSuspensions(fromIndex, map[string][]string{}, nil)
 	if err != nil {
 		t.Fatalf("CheckEnforcementSuspensions(index): %v", err)
 	}
@@ -1082,7 +1082,7 @@ func TestEnforcementJournalIndex_GuildIDsOnly_CannotAnswerPointLookup(t *testing
 	}
 
 	// The actual answer requires the full journals and a Go-side pass.
-	enforcements, err := CheckEnforcementSuspensions(journals, map[string][]string{})
+	enforcements, err := CheckEnforcementSuspensions(journals, map[string][]string{}, nil)
 	if err != nil {
 		t.Fatalf("CheckEnforcementSuspensions: %v", err)
 	}

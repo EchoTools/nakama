@@ -517,8 +517,44 @@ func EnforcementRecordAffectedModes(r GuildEnforcementRecord) []evr.Symbol {
 	return evr.AllModes
 }
 
+// activeSuspensionIn returns, among the active (unexpired, unvoided-in-groupID)
+// suspensions the journal holds for groupID that accept admits, the one that
+// expires last. With a nil accept it is the record ActiveSuspensions reports for
+// the group.
+func (s *GuildEnforcementJournal) activeSuspensionIn(groupID string, accept func(GuildEnforcementRecord) bool) (GuildEnforcementRecord, bool) {
+	var best GuildEnforcementRecord
+	found := false
+	for _, r := range s.RecordsByGroupID[groupID] {
+		if !r.IsSuspension() || s.IsVoid(groupID, r.ID) || r.IsExpired() {
+			continue
+		}
+		if accept != nil && !accept(r) {
+			continue
+		}
+		if !found || r.Expiry.After(best.Expiry) {
+			best, found = r, true
+		}
+	}
+	return best, found
+}
+
+// CheckEnforcementSuspensions reports the active suspension in force for each
+// (group, game mode).
+//
+// A suspension issued in a source guild applies there and in every guild that
+// inherits from it (inheritanceMap), subject to the inheriting guild's filter on
+// that link (filters; nil means every link inherits everything). The source guild
+// itself is never filtered.
+//
+// An inheriting guild takes the record that expires last among those its filter
+// admits. That is not always the source guild's longest record: the source's
+// longest may be a public-only restriction the filter refuses while a shorter full
+// ban passes, so each link is evaluated against every active record, not against
+// the one ActiveSuspensions keeps. With no filter the two coincide, so a link
+// without a filter behaves as it did before filters existed.
+//
 // map[GroupID]map[GameMode]GuildEnforcementRecord
-func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritanceMap map[string][]string) (ActiveGuildEnforcements, error) {
+func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritanceMap map[string][]string, filters InheritanceFilters) (ActiveGuildEnforcements, error) {
 
 	type index struct {
 		GroupID  string
@@ -528,23 +564,31 @@ func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritan
 	// Collect all active suspensions for the user and their alts
 	activeRecords := make(map[index]GuildEnforcementRecord, len(journals))
 	for _, journal := range journals {
-		// Check if the user has an active suspension
-		for srcGroupID, r := range journal.ActiveSuspensions() {
-			// Include the groups that will inherit the suspension
-			// map[parentGroupID]map[childGroupID]bool
-			affectedGroupIDs := append(append([]string(nil), inheritanceMap[srcGroupID]...), srcGroupID)
+		apply := func(affectedGroupID string, r GuildEnforcementRecord) {
 			// Apply the suspension to all affected modes
-			affectedModes := EnforcementRecordAffectedModes(r)
-			// Apply the suspension to all affected modes/groups
-			for _, mode := range affectedModes {
-				for _, affectedGroupID := range affectedGroupIDs {
-					idx := index{
-						GroupID:  affectedGroupID,
-						GameMode: mode,
-					}
-					if a := activeRecords[idx]; a.Expiry.Before(r.Expiry) && !journal.IsVoid(affectedGroupID, r.ID) {
-						activeRecords[idx] = r
-					}
+			for _, mode := range EnforcementRecordAffectedModes(r) {
+				idx := index{
+					GroupID:  affectedGroupID,
+					GameMode: mode,
+				}
+				if a := activeRecords[idx]; a.Expiry.Before(r.Expiry) && !journal.IsVoid(affectedGroupID, r.ID) {
+					activeRecords[idx] = r
+				}
+			}
+		}
+		for srcGroupID := range journal.RecordsByGroupID {
+			// The source guild takes its own enforcement unfiltered.
+			if r, ok := journal.activeSuspensionIn(srcGroupID, nil); ok {
+				apply(srcGroupID, r)
+			}
+			// Each inheriting guild takes what its filter admits.
+			for _, childGroupID := range inheritanceMap[srcGroupID] {
+				var accept func(GuildEnforcementRecord) bool
+				if f := filters.For(srcGroupID, childGroupID); !f.IsDefault() {
+					accept = f.Accepts
+				}
+				if r, ok := journal.activeSuspensionIn(srcGroupID, accept); ok {
+					apply(childGroupID, r)
 				}
 			}
 		}
@@ -570,12 +614,12 @@ func CheckEnforcementSuspensions(journals GuildEnforcementJournalList, inheritan
 // settings (ignore_disabled_alternates, RejectPlayersWithSuspendedAlternates)
 // discard an alt record must therefore consult this result before admitting:
 // the player's own suspension is not subject to those settings.
-func CheckOwnEnforcementSuspensions(userID string, journals GuildEnforcementJournalList, inheritanceMap map[string][]string) (ActiveGuildEnforcements, error) {
+func CheckOwnEnforcementSuspensions(userID string, journals GuildEnforcementJournalList, inheritanceMap map[string][]string, filters InheritanceFilters) (ActiveGuildEnforcements, error) {
 	own := GuildEnforcementJournalList{}
 	if j, ok := journals[userID]; ok {
 		own[userID] = j
 	}
-	return CheckEnforcementSuspensions(own, inheritanceMap)
+	return CheckEnforcementSuspensions(own, inheritanceMap, filters)
 }
 
 func FormatDuration(d time.Duration) string {

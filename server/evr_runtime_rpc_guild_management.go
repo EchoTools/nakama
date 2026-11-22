@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"slices"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -67,6 +69,48 @@ func guildGroupResponse(ctx context.Context, nk runtime.NakamaModule, groupID st
 	return string(b), nil
 }
 
+// saveGroupMetadata persists a guild's metadata. It is a variable so a test can
+// drive GuildGroupUpdateRPC without a database; production always uses the
+// default, which needs the real runtime module for its *sql.DB.
+var saveGroupMetadata = func(ctx context.Context, nk runtime.NakamaModule, groupID string, md *GroupMetadata) error {
+	_nk, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok {
+		return errors.New("nakama module has no database")
+	}
+	return GroupMetadataSave(ctx, _nk.db, groupID, md)
+}
+
+// inheritanceFiltersProvided reports whether the request's metadata carries a
+// suspension_inheritance_filters key at all, which the decoded struct cannot say:
+// an omitted map and an explicit null decode alike.
+func inheritanceFiltersProvided(payload string) bool {
+	var probe struct {
+		Metadata *struct {
+			Filters json.RawMessage `json:"suspension_inheritance_filters"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(payload), &probe); err != nil || probe.Metadata == nil {
+		return false
+	}
+	return probe.Metadata.Filters != nil
+}
+
+// retainedInheritanceFilters returns the stored filters whose source is still one
+// of the guild's inheritance links. A filter for a source that is no longer
+// linked has nothing to narrow, and carrying it would fail validation.
+func retainedInheritanceFilters(stored map[string]SuspensionInheritanceFilter, linked []string) map[string]SuspensionInheritanceFilter {
+	var kept map[string]SuspensionInheritanceFilter
+	for src, f := range stored {
+		if slices.Contains(linked, src) {
+			if kept == nil {
+				kept = make(map[string]SuspensionInheritanceFilter, len(stored))
+			}
+			kept[src] = f
+		}
+	}
+	return kept
+}
+
 func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if !ok || userID == "" {
@@ -90,6 +134,26 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		return "", runtime.NewError("permission denied: only a guild admin can update the guild", 7)
 	}
 
+	// Everything in the request is checked before the first write, so a request
+	// that is refused changes nothing.
+	if req.Metadata != nil {
+		req.Metadata.GuildID = gg.GuildID
+		req.Metadata.OwnerID = gg.OwnerID
+		// req.Metadata replaces the stored metadata whole. A client that does not
+		// send the filters keeps the stored ones; sending them, even empty or null,
+		// replaces them.
+		if !inheritanceFiltersProvided(payload) {
+			req.Metadata.SuspensionInheritanceFilters = retainedInheritanceFilters(gg.SuspensionInheritanceFilters, req.Metadata.SuspensionInheritanceGroupIDs)
+		}
+		if err := req.Metadata.ValidateSuspensionInheritanceFilters(); err != nil {
+			return "", runtime.NewError(err.Error(), 3)
+		}
+	}
+	changed, err := applyRulesTextUpdate(gg, &req)
+	if err != nil {
+		return "", runtime.NewError(err.Error(), 3)
+	}
+
 	if update := buildGroupUpdateInput(gg, &req); update != nil {
 		if err := nk.GroupUpdate(ctx, req.GroupID, SystemUserID, update.Name, "", update.LangTag, update.Description, update.AvatarURL, update.Open, nil, int(gg.Group.MaxCount)); err != nil {
 			return "", runtime.NewError("failed to update group", 13)
@@ -97,21 +161,11 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	}
 
 	if req.Metadata != nil {
-		req.Metadata.GuildID = gg.GuildID
-		req.Metadata.OwnerID = gg.OwnerID
-		_nk, ok := nk.(*RuntimeGoNakamaModule)
-		if !ok {
-			return "", runtime.NewError("internal error", 13)
-		}
-		if err := GroupMetadataSave(ctx, _nk.db, req.GroupID, req.Metadata); err != nil {
+		if err := saveGroupMetadata(ctx, nk, req.GroupID, req.Metadata); err != nil {
 			return "", runtime.NewError("failed to save metadata", 13)
 		}
 	}
 
-	changed, err := applyRulesTextUpdate(gg, &req)
-	if err != nil {
-		return "", runtime.NewError(err.Error(), 3)
-	}
 	if changed {
 		if err := StorableWrite(ctx, nk, ServiceSettings().DiscordBotUserID, gg.State); err != nil {
 			logger.WithField("error", err).Error("Failed to save guild rules text")

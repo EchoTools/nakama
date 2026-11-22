@@ -99,6 +99,7 @@ func TestGuildBanEnforcement_BlocksAllJoinPaths(t *testing.T) {
 	enforcements, err := CheckEnforcementSuspensions(
 		GuildEnforcementJournalList{userID: journal},
 		map[string][]string{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("CheckEnforcementSuspensions: %v", err)
@@ -150,6 +151,7 @@ func TestGuildBanEnforcement_GuildIsolation(t *testing.T) {
 	enforcements, err := CheckEnforcementSuspensions(
 		GuildEnforcementJournalList{userID: journal},
 		map[string][]string{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("CheckEnforcementSuspensions: %v", err)
