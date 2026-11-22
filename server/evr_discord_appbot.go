@@ -4289,18 +4289,17 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 	return nil
 }
 
-// EscapeDiscordMarkdown escapes all Discord markdown special characters in s
-// so the string renders as plain text in message content.
-// Characters escaped: \ ` * _ ~ | > [ ] ( ) @ # <
-
 // botStatusCounts is the player and match counts the bot status shows. A match's
 // players are its presences less the game server and less the moderators the list
-// label builder leaves out; a match whose label cannot be read is not counted.
+// label builder leaves out; a match whose label cannot be read counts its presences
+// less the game server.
 func botStatusCounts(logger runtime.Logger, matches []*api.Match) (players, matchCount int) {
 	for _, match := range matches {
 		label, err := MatchLabelFromString(match.GetLabel().GetValue())
 		if err != nil {
-			logger.WithField("err", err).Warn("Failed to parse match label for the bot status.")
+			logger.WithField("err", err).Debug("Failed to parse match label for the bot status.")
+			players += int(match.Size) - 1
+			matchCount++
 			continue
 		}
 		size := sizeAfterFilter(match.Size, label, filterLabelPlayers(label, false))
@@ -4389,6 +4388,9 @@ func (d *DiscordAppBot) regionStatusEmbed(ctx context.Context, logger runtime.Lo
 	return embed, nil
 }
 
+// EscapeDiscordMarkdown escapes all Discord markdown special characters in s
+// so the string renders as plain text in message content.
+// Characters escaped: \ ` * _ ~ | > [ ] ( ) @ # <
 func EscapeDiscordMarkdown(s string) string {
 	// Use a builder for single-pass, per-character escaping. This avoids
 	// ordering issues that arise with strings.NewReplacer when both

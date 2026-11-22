@@ -108,12 +108,12 @@ func TestBotStatusCounts_LeavesOutModerators(t *testing.T) {
 	}
 }
 
-func TestBotStatusCounts_SkipsUnreadableLabel(t *testing.T) {
+func TestBotStatusCounts_CountsUnreadableLabelBySize(t *testing.T) {
 	bad := &api.Match{Size: 3, Label: wrapperspb.String("not json")}
 
 	players, matches := botStatusCounts(&testLogger{t: t}, []*api.Match{bad})
 
-	if players != 0 || matches != 0 {
-		t.Errorf("counted an unreadable match: players=%d matches=%d", players, matches)
+	if players != 2 || matches != 1 {
+		t.Errorf("unreadable match counted as players=%d matches=%d, want 2 and 1", players, matches)
 	}
 }

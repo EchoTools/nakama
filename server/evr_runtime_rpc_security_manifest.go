@@ -127,6 +127,8 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 				break
 			}
 		}
+		// Checks at most securityManifestManageChecks guilds, in group id order, for a
+		// Discord manage permission.
 		for i, groupID := range groupIDs {
 			if selectedGuildID != "" || i >= securityManifestManageChecks {
 				break
