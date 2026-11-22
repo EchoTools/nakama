@@ -79,6 +79,13 @@ type inviteTestWorld struct {
 	regionSet  inviteRegionSet
 	regionsErr error
 	regionCall int
+
+	// journals: user id -> that user's enforcement journal. The seam below runs the
+	// seat's own rules over them, so a test writes a record and asks the RPC.
+	journals    map[string]*GuildEnforcementJournal
+	altsCount   bool
+	suspendErr  error
+	suspendCall int
 }
 
 // newInviteWorld installs the seams the RPCs reach outside storage through and
@@ -93,12 +100,24 @@ func newInviteWorld(t *testing.T) *inviteTestWorld {
 		groups:    map[string]uuid.UUID{},
 		noHistory: map[string]bool{},
 		noAccess:  map[string]bool{},
+		journals:  map[string]*GuildEnforcementJournal{},
 		logs:      logs,
 		ip:        "203.0.113.7",
 		logger:    NewRuntimeGoLogger(zap.New(core)),
 	}
 	origNow, origAlloc, origLimiter, origGroup, origCode := inviteNow, inviteAllocate, inviteLimiter, inviteActiveGroup, inviteNewCode
-	origHistory, origRegions, origAccess := inviteHasHistory, inviteRegions, inviteGuildAccess
+	origHistory, origRegions, origAccess, origSuspensions := inviteHasHistory, inviteRegions, inviteGuildAccess, inviteSuspensions
+	inviteSuspensions = func(_ context.Context, _ runtime.NakamaModule, userID string, groupID uuid.UUID) (inviteSuspensionSet, error) {
+		w.suspendCall++
+		if w.suspendErr != nil {
+			return nil, w.suspendErr
+		}
+		list := GuildEnforcementJournalList{}
+		for id, j := range w.journals {
+			list[id] = j
+		}
+		return inviteSuspensionsFrom(userID, groupID.String(), list, nil, w.altsCount)
+	}
 	inviteGuildAccess = func(_ context.Context, _ runtime.NakamaModule, userID string, _ uuid.UUID) (bool, error) {
 		return !w.noAccess[userID], nil
 	}
@@ -128,7 +147,7 @@ func newInviteWorld(t *testing.T) *inviteTestWorld {
 	}
 	t.Cleanup(func() {
 		inviteNow, inviteAllocate, inviteLimiter, inviteActiveGroup, inviteNewCode = origNow, origAlloc, origLimiter, origGroup, origCode
-		inviteHasHistory, inviteRegions, inviteGuildAccess = origHistory, origRegions, origAccess
+		inviteHasHistory, inviteRegions, inviteGuildAccess, inviteSuspensions = origHistory, origRegions, origAccess, origSuspensions
 	})
 	return w
 }

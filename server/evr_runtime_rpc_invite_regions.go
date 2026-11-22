@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/heroiclabs/nakama/v3/server/evr"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -128,10 +129,15 @@ func InviteRegionsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	rec.args["experience"], rec.args["mode"] = req.Experience, req.Mode
 	// Every invite game is private, so the list does not vary with the mode; an
 	// experience is still checked against its mode as invite/create does.
+	// The mode stays 0 when no experience is named: then a refusal needs every
+	// invite mode covered.
+	var requested evr.Symbol
 	if req.Experience != "" {
-		if _, ok := parseInviteMode(req.Experience, req.Mode); !ok {
+		mode, ok := parseInviteMode(req.Experience, req.Mode)
+		if !ok {
 			return "", inviteRefusal("invalid")
 		}
+		requested = mode
 	}
 
 	groupID, err := inviteActiveGroup(ctx, nk, userID)
@@ -146,6 +152,9 @@ func InviteRegionsRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 		return "", fmt.Errorf("invite regions: guild access: %w", err)
 	} else if !member {
 		return "", inviteRefusal("denied")
+	}
+	if err := inviteCheckSuspension(ctx, nk, "regions", userID, groupID, requested); err != nil {
+		return "", err
 	}
 
 	hasHistory, err := inviteHasHistory(ctx, nk, userID)
