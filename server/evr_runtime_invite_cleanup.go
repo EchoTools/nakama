@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 )
 
 // Invite code cleanup (#764).
@@ -40,6 +42,30 @@ func inviteRemovable(inv *StoredInvite, now time.Time) bool {
 	return inv.Revoked || !now.Before(inv.ExpiresAt.Add(inviteExpiredRetention))
 }
 
+// inviteDeleteRejected reports whether storage refused a versioned delete because
+// the object changed or is already gone.
+//
+// A write says so with runtime.ErrStorageRejectedVersion; a delete does not.
+// storageDeleteObjects raises StatusError(InvalidArgument, "Storage delete
+// rejected."), but StorageDeleteObjects unwraps it and RuntimeGoNakamaModule.
+// StorageDelete hands its caller e.Cause(): a bare error whose text is "Storage
+// delete rejected - not found, version check failed, or permission denied." That
+// bare form is what production returns, so it is matched by its text; the
+// StatusError and the sentinel are matched too, for a caller that wraps either.
+func inviteDeleteRejected(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, runtime.ErrStorageRejectedVersion) {
+		return true
+	}
+	var se *statusError
+	if errors.As(err, &se) && se.Code() == codes.InvalidArgument {
+		return true
+	}
+	return strings.Contains(err.Error(), "Storage delete rejected")
+}
+
 // inviteSweepResult counts what one sweep removed.
 type inviteSweepResult struct {
 	Codes  int // code objects deleted
@@ -49,23 +75,31 @@ type inviteSweepResult struct {
 // startInviteCodeCleanup sweeps now and then every inviteCleanupInterval until
 // ctx ends.
 func startInviteCodeCleanup(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule) {
-	go func() {
-		ticker := time.NewTicker(inviteCleanupInterval)
-		defer ticker.Stop()
-		for {
-			res, err := sweepInviteCodes(ctx, logger, nk)
-			if err != nil {
-				logger.Warn("invite code cleanup failed", zap.Error(err))
-			} else if res.Codes > 0 || res.Owners > 0 {
-				logger.Info("invite code cleanup", zap.Int("codes_removed", res.Codes), zap.Int("owner_indexes_changed", res.Owners))
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
+	go inviteCleanupLoop(ctx, logger, nk, inviteCleanupInterval)
+}
+
+// inviteCleanupLoop is the body of startInviteCodeCleanup. It returns when ctx
+// ends.
+func inviteCleanupLoop(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		res, err := sweepInviteCodes(ctx, logger, nk)
+		switch {
+		case ctx.Err() != nil:
+			// Shutdown cancelled the sweep. That is expected, not a failure.
+			return
+		case err != nil:
+			logger.Warn("invite code cleanup failed", zap.Error(err))
+		case res.Codes > 0 || res.Owners > 0:
+			logger.Info("invite code cleanup", zap.Int("codes_removed", res.Codes), zap.Int("owner_indexes_changed", res.Owners))
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // sweepInviteCodes deletes the dead codes, then prunes the owner indexes of every
@@ -98,7 +132,8 @@ func sweepInviteCodes(ctx context.Context, logger *zap.Logger, nk runtime.Nakama
 			switch {
 			case err == nil:
 				res.Codes++
-			case errors.Is(err, runtime.ErrStorageRejectedVersion):
+			case inviteDeleteRejected(err):
+				// Written since the list (a revoke, say): leave it, the next sweep looks again.
 			default:
 				return res, fmt.Errorf("delete code: %w", err)
 			}
@@ -116,7 +151,7 @@ func sweepInviteCodes(ctx context.Context, logger *zap.Logger, nk runtime.Nakama
 			return res, fmt.Errorf("list owners: %w", err)
 		}
 		for _, obj := range objs {
-			changed, err := pruneInviteOwner(ctx, nk, obj.Key, obj.Value, obj.Version, now)
+			changed, err := pruneInviteOwner(ctx, logger, nk, obj.Key, obj.Value, obj.Version, now)
 			if err != nil {
 				return res, fmt.Errorf("prune owner: %w", err)
 			}
@@ -135,7 +170,7 @@ func sweepInviteCodes(ctx context.Context, logger *zap.Logger, nk runtime.Nakama
 // pruneInviteOwner drops from one owner's index the codes that are gone or dead,
 // and deletes the index when nothing is left. It only ever removes the codes it
 // judged, so a code added by invite/create since is kept.
-func pruneInviteOwner(ctx context.Context, nk runtime.NakamaModule, ownerID, value, version string, now time.Time) (bool, error) {
+func pruneInviteOwner(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, ownerID, value, version string, now time.Time) (bool, error) {
 	idx := &storedInviteOwner{}
 	if err := json.Unmarshal([]byte(value), idx); err != nil {
 		return false, nil // unreadable: leave it
@@ -143,6 +178,13 @@ func pruneInviteOwner(ctx context.Context, nk runtime.NakamaModule, ownerID, val
 	var drop []string
 	for _, code := range idx.Codes {
 		inv, err := loadInvite(ctx, nk, code)
+		var syntax *json.SyntaxError
+		var typ *json.UnmarshalTypeError
+		if errors.As(err, &syntax) || errors.As(err, &typ) {
+			// Not ours to judge, as in the code loop: keep the entry, prune the rest.
+			logger.Warn("invite code cleanup: unreadable code in an owner index", zap.Int("code_len", len(code)), zap.Error(err))
+			continue
+		}
 		if err != nil {
 			return false, err
 		}
@@ -158,7 +200,7 @@ func pruneInviteOwner(ctx context.Context, nk runtime.NakamaModule, ownerID, val
 		switch {
 		case err == nil:
 			return true, nil
-		case errors.Is(err, runtime.ErrStorageRejectedVersion):
+		case inviteDeleteRejected(err):
 			// invite/create wrote to it since the list; the next sweep looks again.
 			return false, nil
 		default:
