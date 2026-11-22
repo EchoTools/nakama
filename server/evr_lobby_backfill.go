@@ -232,6 +232,10 @@ func (b *PostMatchmakerBackfill) findBestBackfillMatchOptimized(
 		if candidateServerBlacklisted(candidate, match.externalIP) {
 			continue
 		}
+		// A member's join expired from this match recently: the match removed them, so do not place them back.
+		if candidateExpiredFrom(candidate, match.Label.ID.UUID, bctx.now) {
+			continue
+		}
 		possibleTeams := b.getPossibleTeams(candidate.BackfillCandidate, match.BackfillMatch, partySize)
 		if len(possibleTeams) == 0 {
 			continue
