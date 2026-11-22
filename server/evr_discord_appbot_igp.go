@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"maps"
@@ -29,6 +30,7 @@ type InGamePanel struct {
 	ctx      context.Context
 	cancelFn context.CancelFunc
 	nk       runtime.NakamaModule
+	db       *sql.DB
 	logger   runtime.Logger
 	cache    *DiscordIntegrator
 	dg       *discordgo.Session
@@ -42,7 +44,7 @@ type InGamePanel struct {
 	isStopped         *atomic.Bool
 }
 
-func NewInGamePanel(nk runtime.NakamaModule, logger runtime.Logger, dg *discordgo.Session, cache *DiscordIntegrator, userID string) *InGamePanel {
+func NewInGamePanel(nk runtime.NakamaModule, db *sql.DB, logger runtime.Logger, dg *discordgo.Session, cache *DiscordIntegrator, userID string) *InGamePanel {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	logger = logger.WithFields(map[string]any{"uid": userID})
@@ -50,6 +52,7 @@ func NewInGamePanel(nk runtime.NakamaModule, logger runtime.Logger, dg *discordg
 		ctx:               ctx,
 		cancelFn:          cancel,
 		nk:                nk,
+		db:                db,
 		logger:            logger,
 		dg:                dg,
 		cache:             cache,
@@ -153,7 +156,7 @@ func (p *InGamePanel) retrieveCurrentMatchLabel(ctx context.Context, userID stri
 		return nil, errors.New("failed to get match label")
 	}
 
-	return label, nil
+	return labelForViewer(ctx, p.logger, p.db, p.nk, userID, label).MatchLabel, nil
 }
 func (p *InGamePanel) NewInteraction(i *discordgo.InteractionCreate) (*discordgo.InteractionCreate, error) {
 	prevInteraction := p.interactionCreate.Swap(i)
@@ -774,7 +777,7 @@ func (d *DiscordAppBot) handleInGamePanel(ctx context.Context, logger runtime.Lo
 
 	// Check if there is already a panel for this user, delete it and move to this interaction
 	// Create a new InGamePanel instance
-	igp = NewInGamePanel(d.nk, logger, s, d.cache, userID)
+	igp = NewInGamePanel(d.nk, d.db, logger, s, d.cache, userID)
 
 	// Start a goroutine to handle the interaction, and keep it updated
 	go igp.Start()
