@@ -114,11 +114,8 @@ func (r *GuildGroupRegistry) rebuildGuildGroups() {
 			// Add the group to the registry.
 			guildGroups[group.Id] = gg
 
-			// Build the inheretence map.
-
-			for _, parentID := range gg.SuspensionInheritanceGroupIDs {
-				inheritanceMap[parentID] = append(inheritanceMap[parentID], group.Id)
-			}
+			// Build the inheritance map and the per-link filters.
+			addInheritanceLinks(group.Id, &gg.GroupMetadata, inheritanceMap, filters)
 		}
 		if cursor == "" {
 			break

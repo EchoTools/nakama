@@ -6,8 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/atomic"
 )
 
 const (
@@ -289,5 +291,100 @@ func TestGuildGroupUpdateRPC_RejectsInvalidInheritanceFilter(t *testing.T) {
 				t.Fatalf("err = %#v, want runtime error code 3 (invalid argument)", err)
 			}
 		})
+	}
+}
+
+// guildListNakama lists its guild groups to the registry's rebuild and serves
+// their state objects from the shared storage double.
+type guildListNakama struct {
+	*occTestNakamaModule
+	groups []*api.Group
+}
+
+func (n *guildListNakama) GroupsList(ctx context.Context, name, langTag string, members *int, open *bool, limit int, cursor string) ([]*api.Group, string, error) {
+	return n.groups, "", nil
+}
+
+// newRebuiltRegistry builds a registry the way production does, through
+// rebuildGuildGroups, over guilds whose stored metadata is given by group id.
+func newRebuiltRegistry(t *testing.T, metadata map[string]string) *GuildGroupRegistry {
+	t.Helper()
+	prev := serviceSettings.Load()
+	ServiceSettingsUpdate(&ServiceSettingsData{DiscordBotUserID: "bot-uid"})
+	t.Cleanup(func() { serviceSettings.Store(prev) })
+
+	nk := &guildListNakama{occTestNakamaModule: newOCCTestNakamaModule()}
+	for id, md := range metadata {
+		nk.groups = append(nk.groups, &api.Group{Id: id, Name: id, LangTag: GuildGroupLangTag, Metadata: md})
+		state, _ := json.Marshal(map[string]any{"group_id": id})
+		nk.seedObject("bot-uid", StorageCollectionState, id, string(state))
+	}
+	r := &GuildGroupRegistry{
+		ctx:                context.Background(),
+		logger:             newCaptureLogger(),
+		nk:                 nk,
+		guildGroups:        atomic.NewPointer(&map[string]*GuildGroup{}),
+		inheritanceMap:     atomic.NewPointer(&map[string][]string{}),
+		inheritanceFilters: atomic.NewPointer(&InheritanceFilters{}),
+	}
+	r.rebuildGuildGroups()
+	return r
+}
+
+// The registry production code reads must carry the filter a guild stored.
+func TestRebuildGuildGroups_CarriesStoredInheritanceFilters(t *testing.T) {
+	r := newRebuiltRegistry(t, map[string]string{
+		inhChild: `{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"minimum_duration_seconds":604800,"scope":"full_bans"}}}`,
+		inhOther: `{"suspension_inheritence_group_ids":["` + inhSrc + `"]}`,
+		inhSrc:   `{}`,
+	})
+	if got := r.InheritanceByParentGroupID()[inhSrc]; len(got) != 2 {
+		t.Fatalf("links = %v, want both guilds", got)
+	}
+	f := r.InheritanceFilters().For(inhSrc, inhChild)
+	if f.MinimumDurationSeconds != 604800 || f.Scope != InheritScopeFullBans {
+		t.Fatalf("filter on %s<-%s = %+v, want the stored one", inhChild, inhSrc, f)
+	}
+	if !r.InheritanceFilters().For(inhSrc, inhOther).IsDefault() {
+		t.Fatalf("an unfiltered link must stay default")
+	}
+}
+
+// A guild admin saves a filter through the RPC as the client sends it; once
+// stored, the guild group and the registry both see it.
+func TestGuildGroupUpdateRPC_ValidFilterReachesGuildGroupAndRegistry(t *testing.T) {
+	ownerCtx := context.WithValue(context.Background(), runtime.RUNTIME_CTX_USER_ID, "owner-uid") //nolint:staticcheck // SA1029: key type is dictated by the runtime API
+	nk, gid := newRulesRPCFixture(t, "")
+
+	prevSave := saveGroupMetadata
+	t.Cleanup(func() { saveGroupMetadata = prevSave })
+	var saved int
+	saveGroupMetadata = func(_ context.Context, _ runtime.NakamaModule, groupID string, md *GroupMetadata) error {
+		saved++
+		b, err := json.Marshal(md) // what GroupMetadataSave writes to the groups table
+		nk.group.Metadata = string(b)
+		return err
+	}
+
+	payload := `{"group_id":"` + gid + `","metadata":{"suspension_inheritence_group_ids":["` + inhSrc + `"],"suspension_inheritance_filters":{"` + inhSrc + `":{"minimum_duration_seconds":604800,"scope":"full_bans"}}}}`
+	if _, err := GuildGroupUpdateRPC(ownerCtx, newCaptureLogger(), nil, nk, payload); err != nil {
+		t.Fatalf("rpc: %v", err)
+	}
+	if saved != 1 {
+		t.Fatalf("metadata saved %d times, want 1", saved)
+	}
+
+	gg, err := GuildGroupLoad(ownerCtx, nk, gid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := gg.InheritanceFilterFor(inhSrc); f.MinimumDurationSeconds != 604800 || f.Scope != InheritScopeFullBans {
+		t.Fatalf("GuildGroup filter = %+v", f)
+	}
+
+	// The registry rebuilt from the same stored group reaches the same answer.
+	r := newRebuiltRegistry(t, map[string]string{gid: nk.group.Metadata})
+	if f := r.InheritanceFilters().For(inhSrc, gid); f.Scope != InheritScopeFullBans {
+		t.Fatalf("registry filter = %+v", f)
 	}
 }

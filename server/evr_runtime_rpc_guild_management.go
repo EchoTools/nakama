@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 
 	"github.com/heroiclabs/nakama-common/runtime"
 )
@@ -67,6 +68,17 @@ func guildGroupResponse(ctx context.Context, nk runtime.NakamaModule, groupID st
 	return string(b), nil
 }
 
+// saveGroupMetadata persists a guild's metadata. It is a variable so a test can
+// drive GuildGroupUpdateRPC without a database; production always uses the
+// default, which needs the real runtime module for its *sql.DB.
+var saveGroupMetadata = func(ctx context.Context, nk runtime.NakamaModule, groupID string, md *GroupMetadata) error {
+	_nk, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok {
+		return errors.New("nakama module has no database")
+	}
+	return GroupMetadataSave(ctx, _nk.db, groupID, md)
+}
+
 func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	userID, ok := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if !ok || userID == "" {
@@ -102,11 +114,7 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		if err := req.Metadata.ValidateSuspensionInheritanceFilters(); err != nil {
 			return "", runtime.NewError(err.Error(), 3)
 		}
-		_nk, ok := nk.(*RuntimeGoNakamaModule)
-		if !ok {
-			return "", runtime.NewError("internal error", 13)
-		}
-		if err := GroupMetadataSave(ctx, _nk.db, req.GroupID, req.Metadata); err != nil {
+		if err := saveGroupMetadata(ctx, nk, req.GroupID, req.Metadata); err != nil {
 			return "", runtime.NewError("failed to save metadata", 13)
 		}
 	}
