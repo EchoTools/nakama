@@ -1890,6 +1890,7 @@ func (m *EvrMatch) MatchShutdown(ctx context.Context, logger runtime.Logger, db 
 	if err := m.updateLabel(logger, dispatcher, state); err != nil {
 		logger.WithField("error", err).Error("failed to update label on shutdown")
 	}
+	flushMatchRegistryLabelUpdates(nk) // #747: write open=false to the index now, not on the next tick
 
 	if err := StoreMatchLabel(dbCtx, nk, state); err != nil {
 		logger.WithField("error", err).Warn("failed to store match label on shutdown")
