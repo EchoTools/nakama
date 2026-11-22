@@ -203,6 +203,18 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 	return LobbyJoinEntrants(logger, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
 }
 func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	return lobbyJoinEntrants(logger, matchRegistry, tracker, session, serverSession, label, false, entrants...)
+}
+
+// lobbyJoinEntrantsFromBackfill is LobbyJoinEntrants for a backfill placement. A backfill cycle re-offers
+// tickets whose entrants may already hold a seat in the match, so while such a seat's join marker is pending
+// the placement's sends are held. No other caller is held: a party follow that is answered with the kept
+// success must still be answered.
+func lobbyJoinEntrantsFromBackfill(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	return lobbyJoinEntrants(logger, matchRegistry, tracker, session, serverSession, label, true, entrants...)
+}
+
+func lobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, fromBackfill bool, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
 		return ErrSessionNotFound
 	}
@@ -238,9 +250,13 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	var reason string
 	var labelStr string
 
-	// Read the marker before the attempt. A granted attempt adds one for this join, so a marker read after
-	// it cannot tell a second join from the first.
-	priorAge, priorPending := pendingJoinMarkerAge(matchRegistry, label.ID.UUID, e.SessionID)
+	// Only a backfill placement holds, so only it reads the marker. It reads the marker before the attempt:
+	// a granted attempt adds one for this join, so a marker read after it cannot tell a second join from the first.
+	var priorAge time.Duration
+	var priorPending bool
+	if fromBackfill {
+		priorAge, priorPending = pendingJoinMarkerAge(matchRegistry, label.ID.UUID, e.SessionID)
+	}
 
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
@@ -422,7 +438,7 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
-	// A granted join while this entrant's marker was already pending is a second join for the seat. The
+	// A backfill grant while this entrant's marker was already pending is a second join for the seat. The
 	// success sent with the first join is the one whose keys the game server holds, so this one is not sent.
 	if priorPending {
 		logJoinHeldForMarker(logger, "granted join", label.ID.UUID, e, priorAge)
