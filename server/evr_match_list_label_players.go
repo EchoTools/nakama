@@ -183,6 +183,15 @@ func newRPCModeratorViewer(ctx context.Context, logger runtime.Logger, db *sql.D
 		})
 }
 
+// labelForViewer is label with the moderators left in only when userID may see the
+// moderators of the label's guild. A label that lists none is not looked up.
+func labelForViewer(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, userID string, label *MatchLabel) visibleLabel {
+	if label == nil || !label.hasModeratorEntries() {
+		return visibleLabel{label}
+	}
+	return filterLabelPlayers(label, newRPCModeratorViewer(ctx, logger, db, nk, userID).showsModeratorsOf(label))
+}
+
 // matchGroupIDString is the label's guild id, or "" when it has none.
 func matchGroupIDString(label *MatchLabel) string {
 	if label == nil || label.GroupID == nil {

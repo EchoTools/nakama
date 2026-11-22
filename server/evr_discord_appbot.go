@@ -1810,7 +1810,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// If there are players in the match, show confirmation with match status
 				if len(label.Players) > 0 {
-					embed := d.createShutdownMatchEmbed(label)
+					embed := d.createShutdownMatchEmbed(labelForViewer(ctx, logger, d.db, nk, userID, label))
 
 					// Encode shutdown parameters in the button custom ID
 					disconnectStr := "0"

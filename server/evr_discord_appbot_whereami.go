@@ -41,7 +41,7 @@ type WhereAmIData struct {
 }
 
 // getWhereAmIData retrieves the current match information for a user
-func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, _ runtime.Logger, userID, _ string) (*WhereAmIData, error) {
+func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, logger runtime.Logger, userID, _ string) (*WhereAmIData, error) {
 	// Get the user's current match presence
 	presences, err := d.nk.StreamUserList(StreamModeService, userID, "", StreamLabelMatchService, false, true)
 	if err != nil {
@@ -73,10 +73,11 @@ func (d *DiscordAppBot) getWhereAmIData(ctx context.Context, _ runtime.Logger, u
 		return nil, nil
 	}
 
+	visible := labelForViewer(ctx, logger, d.db, d.nk, userID, label)
 	data := &WhereAmIData{
 		MatchID:   strings.ToUpper(label.ID.UUID.String()),
 		MatchMode: label.Mode.String(),
-		Players:   label.Players,
+		Players:   visible.Players,
 	}
 
 	// Get server information
@@ -208,7 +209,7 @@ func (d *DiscordAppBot) createWhereAmIEmbed(data *WhereAmIData) *discordgo.Messa
 
 // createShutdownMatchEmbed creates a Discord embed showing match status for shutdown confirmation.
 // It displays region, guild, mode, spark link, and current player list from the match label.
-func (d *DiscordAppBot) createShutdownMatchEmbed(label *MatchLabel) *discordgo.MessageEmbed {
+func (d *DiscordAppBot) createShutdownMatchEmbed(label visibleLabel) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Title:       "⚠️ Confirm Match Shutdown",
 		Description: "This match has active players. Are you sure you want to shut it down?",
@@ -941,7 +942,7 @@ func (d *DiscordAppBot) getServerStatsByHost(ctx context.Context, logger runtime
 			statsByHost[hostIP] = &hostStats{}
 		}
 
-		if label.Size >= MinActiveMatchSize {
+		if filterLabelPlayers(label, false).Size >= MinActiveMatchSize {
 			statsByHost[hostIP].Active++
 		} else {
 			statsByHost[hostIP].Idle++
