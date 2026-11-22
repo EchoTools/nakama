@@ -27,6 +27,7 @@ type EnforcementKickRequest struct {
 	RequireCommunityValues bool   `json:"require_community_values,omitempty"` // Require the user to accept the community values before they can rejoin
 	ReporterUserID         string `json:"reporter_user_id,omitempty"`         // User ID of the player who filed/reported the action (issue #466; empty for operator-initiated kicks)
 	ReportID               string `json:"report_id,omitempty"`                // ID of a linked PlayerReport (see PlayerReport.ID) this action stems from
+	PostToSuspensionLog    *bool  `json:"post_to_suspension_log,omitempty"`   // Post the action to the guild's suspension log channel (defaults to true; send false to opt out)
 }
 
 // EnforcementKickResponse represents the response from the kick/enforcement RPC
@@ -36,6 +37,10 @@ type EnforcementKickResponse struct {
 	SessionsKicked   int      `json:"sessions_kicked"`
 	Actions          []string `json:"actions"`
 	SuspensionExpiry int64    `json:"suspension_expiry,omitempty"` // Unix timestamp
+	// PostedToSuspensionLog reports whether the action was posted to the guild's suspension
+	// log channel. False when the caller opted out, the guild has no channel, there was
+	// nothing to report, or the post failed or timed out.
+	PostedToSuspensionLog bool `json:"posted_to_suspension_log"`
 }
 
 // EnforcementKickRPC is the RPC handler for kicking and adding enforcement to players
@@ -223,8 +228,12 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		if gg != nil && gg.SuspensionInheritanceGroupIDs != nil {
 			suspendedGuildIDs = append(suspendedGuildIDs, gg.SuspensionInheritanceGroupIDs...)
 		}
-		_nk := nk.(*RuntimeGoNakamaModule)
-		EnforceGuildSuspension(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID, suspendedGuildIDs)
+		if err := enforceGuildSuspensionFn(ctx, RuntimeLoggerToZapLogger(logger), nk, targetUserID, suspendedGuildIDs); err != nil {
+			// The journal is saved, so the suspension holds at the next join, but the
+			// player was not removed from their match: do not report a kick.
+			LogError(logger, "Failed to kick the player from their matches", zap.Error(err), zap.String("target_user_id", targetUserID))
+			return "", runtime.NewError("Enforcement recorded but the player could not be kicked from their matches", StatusInternalError)
+		}
 		actions = append(actions, "kicked from current match")
 		cnt = len(presences)
 
@@ -244,6 +253,10 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	if !suspensionExpiry.IsZero() && time.Now().Before(suspensionExpiry) {
 		response.SuspensionExpiry = suspensionExpiry.Unix()
 	}
+
+	// The post is bounded by suspensionLogTimeout, so a slow Discord delays the response
+	// and the audit message by at most that long.
+	response.PostedToSuspensionLog = postKickToSuspensionLog(ctx, logger, nk, request, gg, enforcerUserID, targetUserID, kickPlayer, recordsByGroupID, voids)
 
 	responseData, err := json.Marshal(response)
 	if err != nil {
@@ -571,4 +584,143 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	return string(responseData), nil
+}
+
+// enforceGuildSuspensionFn kicks the player from the matches of the suspended guilds. It is
+// a variable so tests can observe the kick without a session registry; production always
+// runs the default, which refuses any module that is not the runtime module.
+var enforceGuildSuspensionFn = func(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, guildGroupIDs []string) error {
+	rnk, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok {
+		return fmt.Errorf("nakama module is %T, not the runtime module: cannot reach the session registry", nk)
+	}
+	EnforceGuildSuspension(ctx, logger, nk, rnk.sessionRegistry, userID, guildGroupIDs)
+	return nil
+}
+
+// suspensionLogTimeout bounds the whole suspension-log post (the lookups and the Discord
+// call), so a slow Discord cannot hold the portal's response.
+var suspensionLogTimeout = 3 * time.Second
+
+// suspensionLogTarget is where a portal kick is posted: the Discord sender and the lookup
+// that names a group on the card.
+type suspensionLogTarget struct {
+	sender    enforcementNoticeSender
+	groupName func(groupID string) string
+}
+
+// resolveSuspensionLogTarget returns the live Discord bot as the post target, or nil when
+// there is no bot. It is a variable so tests can stand in a sender.
+var resolveSuspensionLogTarget = func() *suspensionLogTarget {
+	appBot := globalAppBot.Load()
+	if appBot == nil || appBot.dg == nil {
+		return nil
+	}
+	return &suspensionLogTarget{
+		sender: appBot.dg,
+		groupName: func(groupID string) string {
+			if appBot.guildGroupRegistry == nil {
+				return ""
+			}
+			if g := appBot.guildGroupRegistry.Get(groupID); g != nil {
+				return g.Name()
+			}
+			return ""
+		},
+	}
+}
+
+// postKickToSuspensionLog posts the kick to the guild's suspension log channel, the same
+// card the Discord /kick-player command posts, and reports whether it was posted. Posting
+// is best effort: the kick has already been applied, so a failure is logged and never fails
+// the RPC. A lookup that fails stops the post; the card never carries an empty ID or a raw
+// UUID standing in for a name.
+func postKickToSuspensionLog(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, request EnforcementKickRequest, gg *GuildGroup, enforcerUserID, targetUserID string, kicked bool, recordsByGroupID map[string][]GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid) bool {
+	if !request.PostsToSuspensionLog() || gg == nil || gg.EnforcementNoticeChannelID == "" {
+		return false
+	}
+	if !kicked && len(voids) == 0 {
+		// A void request with no active suspension changed nothing; there is nothing to log.
+		return false
+	}
+	target := resolveSuspensionLogTarget()
+	if target == nil {
+		LogWarn(logger, "Discord bot unavailable; kick not posted to the suspension log", zap.String("group_id", request.GroupID))
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, suspensionLogTimeout)
+	defer cancel()
+
+	// The lookups and the send run off the calling goroutine so a call that ignores the
+	// context still cannot hold the RPC past the timeout. The goroutine ends when its call
+	// returns; every call it makes carries ctx.
+	done := make(chan bool, 1)
+	go func() {
+		done <- sendKickToSuspensionLog(ctx, logger, nk, target, request, gg, enforcerUserID, targetUserID, recordsByGroupID, voids)
+	}()
+	select {
+	case posted := <-done:
+		return posted
+	case <-ctx.Done():
+		LogWarn(logger, "Timed out posting the kick to the suspension log", zap.String("group_id", request.GroupID), zap.Duration("timeout", suspensionLogTimeout))
+		return false
+	}
+}
+
+// sendKickToSuspensionLog resolves the names and IDs on the card, builds it and posts it.
+func sendKickToSuspensionLog(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, target *suspensionLogTarget, request EnforcementKickRequest, gg *GuildGroup, enforcerUserID, targetUserID string, recordsByGroupID map[string][]GuildEnforcementRecord, voids map[string]GuildEnforcementRecordVoid) bool {
+	in := enforcementNoticeInput{
+		RestrictNotes:    gg.RestrictEnforcerNoteVisibility,
+		UserNotice:       request.UserNotice,
+		Notes:            request.ModeratorNotes,
+		GuildID:          gg.GuildID,
+		GroupID:          request.GroupID,
+		RecordsByGroupID: recordsByGroupID,
+		Voids:            voids,
+		GroupName:        target.groupName,
+		Now:              time.Now(),
+	}
+	if request.AllowPrivateLobbies != nil {
+		in.AllowPrivateLobbies = *request.AllowPrivateLobbies
+	} else {
+		in.AllowPrivateLobbies = gg.GetKickPlayerAllowPrivates()
+	}
+
+	account, err := nk.AccountGetId(ctx, enforcerUserID)
+	if err != nil || account == nil {
+		LogWarn(logger, "Failed to load enforcer account; kick not posted to the suspension log", zap.Error(err), zap.String("enforcer_user_id", enforcerUserID))
+		return false
+	}
+	in.ActorDiscordID = account.CustomId
+	in.ActorUsername = account.GetUser().GetUsername()
+	in.ActorName = account.GetUser().GetDisplayName()
+	if in.ActorName == "" {
+		in.ActorName = in.ActorUsername
+	}
+	// A bot or service account has no Discord ID: the card names it by its account name
+	// and carries no mention. With no name either, nothing identifies the enforcer.
+	if in.ActorName == "" {
+		LogWarn(logger, "Enforcer account has no name; kick not posted to the suspension log", zap.String("enforcer_user_id", enforcerUserID))
+		return false
+	}
+
+	profile, err := EVRProfileLoad(ctx, nk, targetUserID)
+	if err != nil {
+		LogWarn(logger, "Failed to load target profile; kick not posted to the suspension log", zap.Error(err), zap.String("target_user_id", targetUserID))
+		return false
+	}
+	in.TargetIGN = profile.GetGroupIGN(request.GroupID)
+	in.TargetDiscordID = profile.DiscordID()
+	if in.TargetIGN == "" || in.TargetDiscordID == "" {
+		LogWarn(logger, "Target profile has no name or Discord ID; kick not posted to the suspension log", zap.String("target_user_id", targetUserID))
+		return false
+	}
+
+	embed, components := buildEnforcementNotice(in)
+	if err := sendEnforcementNotice(ctx, target.sender, gg.EnforcementNoticeChannelID, embed, components); err != nil {
+		LogWarn(logger, "Failed to post kick to the suspension log", zap.Error(err), zap.String("group_id", request.GroupID))
+		return false
+	}
+	return true
 }

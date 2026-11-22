@@ -1166,112 +1166,39 @@ func (d *DiscordAppBot) kickPlayer(logger runtime.Logger, i *discordgo.Interacti
 				return fmt.Errorf("failed to load account metadata: %w", err)
 			}
 
-			title := "Kicked Player"
-			if len(voids) > 0 {
-				title = "Voided Suspension(s)"
-			} else if len(recordsByGroupID) > 0 {
-				title = fmt.Sprintf("Suspension: *%s*", Query.QuoteStringValue(profile.GetGroupIGN(groupID)))
-			}
 			targetDN := profile.GetGroupIGN(groupID)
-			targetDN = EscapeDiscordMarkdown(targetDN)
 			callerDN := caller.DisplayName()
 			if callerDN == "" {
 				callerDN = caller.User.Username
 			}
-			descParts := []string{fmt.Sprintf("%s (<@!%s>)", targetDN, target.ID)}
-			if allowPrivateLobbies {
-				descParts = append(descParts, "✅ **Private lobbies: allowed**")
-			} else {
-				descParts = append(descParts, "🚫 **Private lobbies: not allowed**")
-			}
-
-			embed := &discordgo.MessageEmbed{
-				Author: &discordgo.MessageEmbedAuthor{
-					Name:    fmt.Sprintf("%s (%s)", callerDN, caller.User.Username),
-					IconURL: caller.AvatarURL(""),
-				},
-				Title:       title,
-				Description: strings.Join(descParts, "\n"),
-				Color:       0x9656ce,
-				Fields:      []*discordgo.MessageEmbedField{},
-				Footer: &discordgo.MessageEmbedFooter{
-					Text: "Confidential. Do not share.",
-				},
-			}
-			if len(recordsByGroupID) == 0 {
-				// this is just a kick.
-				parts := []string{
-					fmt.Sprintf("<t:%d:R> by <@!%s>:", time.Now().UTC().Unix(), caller.User.ID),
-					fmt.Sprintf("- `%s`", userNotice),
-				}
-				if notes != "" && !gg.RestrictEnforcerNoteVisibility {
-					parts = append(parts,
-						fmt.Sprintf("- *%s*", notes),
-					)
-				}
-				embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-					Name:   "Kick Details",
-					Value:  strings.Join(parts, "\n"),
-					Inline: true,
-				})
-			}
-
-			for gID, records := range recordsByGroupID {
-				if len(records) == 0 {
-					continue
-				}
-				// Get the group name
-				gn := gID
-				if gg := d.guildGroupRegistry.Get(gID); gg != nil {
-					gn = gg.Name()
-				}
-
-				// Create a field for each group
-				// Show enforcer ID in enforcement notice channel; hide notes when toggle restricts visibility
-				showNotes := !gg.RestrictEnforcerNoteVisibility
-				field := createSuspensionDetailsEmbedField(gn, records, voids, true, showNotes, true, gID, "", false)
-				embed.Fields = append(embed.Fields, field)
-			}
-
-			// Add enforcement buttons for suspension records
-			var components []discordgo.MessageComponent
-			if len(recordsByGroupID) > 0 && len(voids) == 0 {
-				// Only add buttons if there are active suspensions (not voids)
-				for _, records := range recordsByGroupID {
-					for _, record := range records {
-						// Create buttons for each record
-						buttons := []discordgo.MessageComponent{
-							&discordgo.Button{
-								Label:    "Edit",
-								Style:    discordgo.PrimaryButton,
-								CustomID: fmt.Sprintf("enf:e:%s:%s:%s", record.ID, i.GuildID, target.ID),
-							},
-							&discordgo.Button{
-								Label:    "Void",
-								Style:    discordgo.DangerButton,
-								CustomID: fmt.Sprintf("enf:v:%s:%s:%s", record.ID, i.GuildID, target.ID),
-							},
-						}
-						components = append(components, &discordgo.ActionsRow{
-							Components: buttons,
-						})
-						break // Only add buttons for the first record to avoid clutter
+			embed, components := buildEnforcementNotice(enforcementNoticeInput{
+				ActorName:           callerDN,
+				ActorUsername:       caller.User.Username,
+				ActorIconURL:        caller.AvatarURL(""),
+				ActorDiscordID:      caller.User.ID,
+				TargetIGN:           targetDN,
+				TargetDiscordID:     target.ID,
+				UserNotice:          userNotice,
+				Notes:               notes,
+				RestrictNotes:       gg.RestrictEnforcerNoteVisibility,
+				AllowPrivateLobbies: allowPrivateLobbies,
+				GuildID:             i.GuildID,
+				GroupID:             groupID,
+				RecordsByGroupID:    recordsByGroupID,
+				Voids:               voids,
+				GroupName: func(gID string) string {
+					if g := d.guildGroupRegistry.Get(gID); g != nil {
+						return g.Name()
 					}
-					break // Only process first group
-				}
-			}
-
-			_, err = d.dg.ChannelMessageSendComplex(gg.EnforcementNoticeChannelID, &discordgo.MessageSend{
-				Embed:           embed,
-				Components:      components,
-				AllowedMentions: &discordgo.MessageAllowedMentions{},
+					return ""
+				},
+				Now: time.Now(),
 			})
-			if err != nil {
+			if err := sendEnforcementNotice(ctx, d.dg, gg.EnforcementNoticeChannelID, embed, components); err != nil {
 				logger.WithFields(map[string]interface{}{
 					"error": err,
 				}).Error("Failed to send enforcement notice")
 			}
-
 			// Send the same embed to the moderator as an ephemeral response
 			if i != nil {
 				err = respondEmbed([]*discordgo.MessageEmbed{embed}, components)
