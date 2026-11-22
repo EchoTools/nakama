@@ -148,7 +148,7 @@ func TestInviteSuspensionsFrom_RecordCoverageOfInviteModes(t *testing.T) {
 			group := uuid.Must(uuid.NewV4()).String()
 			j := NewGuildEnforcementJournal(userA)
 			j.AddRecord(group, "enforcer", "e", "notice", "", false, tc.allowPrivate, time.Hour)
-			set, err := inviteSuspensionsFrom(userA, group, GuildEnforcementJournalList{userA: j}, nil, true)
+			set, err := inviteSuspensionsFrom(userA, group, GuildEnforcementJournalList{userA: j}, nil, nil, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -189,6 +189,51 @@ func TestInviteCreate_OwnSuspensionHiddenByLongerAltIsStillDenied(t *testing.T) 
 	wantDenied(t, err, "own suspension under a longer alt suspension, alts ignored")
 	if len(w.allocs) != 0 {
 		t.Errorf("allocations = %d, want none", len(w.allocs))
+	}
+}
+
+// An inheriting guild's filter on a link decides what the invite check refuses,
+// as it does at the seat. The player is suspended in a source guild; the guild
+// they create in inherits from it through a link with a 7-day minimum.
+func TestInviteCreate_InheritedSuspensionFollowsTheLinkFilter(t *testing.T) {
+	const minWeek = 7 * 24 * 3600
+	for _, tc := range []struct {
+		name     string
+		duration time.Duration
+		filter   SuspensionInheritanceFilter
+		denied   bool
+	}{
+		{"shorter than the minimum is excluded", time.Hour, SuspensionInheritanceFilter{MinimumDurationSeconds: minWeek}, false},
+		{"longer than the minimum passes", 30 * 24 * time.Hour, SuspensionInheritanceFilter{MinimumDurationSeconds: minWeek}, true},
+		{"no filter inherits everything", time.Hour, SuspensionInheritanceFilter{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newInviteWorld(t)
+			source := uuid.Must(uuid.NewV4())
+			w.groups[userA] = uuid.Must(uuid.NewV4())
+			inheriting := w.groups[userA].String()
+			j := NewGuildEnforcementJournal(userA)
+			j.AddRecord(source.String(), "enforcer", "e", "notice", "", false, false, tc.duration)
+			w.journals[userA] = j
+			w.inheritance = map[string][]string{source.String(): {inheriting}}
+			if !tc.filter.IsDefault() {
+				w.filters = InheritanceFilters{source.String(): {inheriting: tc.filter}}
+			}
+			_, err := w.call(withInviteRecord("create", InviteCreateRPC), userA, map[string]any{"experience": "arena"})
+			if tc.denied {
+				wantDenied(t, err, "inherited suspension that passes the filter")
+				if len(w.allocs) != 0 {
+					t.Errorf("allocations = %d, want none", len(w.allocs))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("inherited suspension the filter excludes refused the invite: %v", err)
+			}
+			if len(w.allocs) != 1 {
+				t.Errorf("allocations = %d, want 1", len(w.allocs))
+			}
+		})
 	}
 }
 
@@ -285,6 +330,44 @@ func TestDefaultInviteSuspensions_Wiring(t *testing.T) {
 			}
 			if got := set.refuses(evr.ModeArenaPrivate); got != tc.want {
 				t.Errorf("refuses(arena_private) = %v, want %v (set %v)", got, tc.want, set)
+			}
+		})
+	}
+}
+
+// defaultInviteSuspensions reads the filters from the guild registry, as the seat
+// does; the RPC tests above supply them through the world's seam.
+func TestDefaultInviteSuspensions_UsesTheRegistrysInheritanceFilters(t *testing.T) {
+	source, inheriting := uuid.Must(uuid.NewV4()).String(), uuid.Must(uuid.NewV4())
+	for _, tc := range []struct {
+		name     string
+		duration time.Duration
+		want     bool
+	}{{"excluded by the filter", time.Hour, false}, {"passes the filter", 30 * 24 * time.Hour, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := globalAppBot.Load()
+			t.Cleanup(func() { globalAppBot.Store(prev) })
+			groups := map[string]*GuildGroup{}
+			filters := InheritanceFilters{source: {inheriting.String(): {MinimumDurationSeconds: 7 * 24 * 3600}}}
+			globalAppBot.Store(&DiscordAppBot{guildGroupRegistry: &GuildGroupRegistry{
+				guildGroups:        atomic.NewPointer(&groups),
+				inheritanceMap:     atomic.NewPointer(&map[string][]string{source: {inheriting.String()}}),
+				inheritanceFilters: atomic.NewPointer(&filters),
+			}})
+			j := NewGuildEnforcementJournal(userA)
+			j.AddRecord(source, "enforcer", "e", "notice", "", false, false, tc.duration)
+			b, err := json.Marshal(j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nk := newOCCTestNakamaModule()
+			nk.seedObject(userA, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal, string(b))
+			set, err := defaultInviteSuspensions(t.Context(), nk, userA, inheriting)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := set.refuses(evr.ModeArenaPrivate); got != tc.want {
+				t.Errorf("refuses(arena_private) = %v, want %v", got, tc.want)
 			}
 		})
 	}

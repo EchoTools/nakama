@@ -84,6 +84,8 @@ type inviteTestWorld struct {
 	// seat's own rules over them, so a test writes a record and asks the RPC.
 	journals    map[string]*GuildEnforcementJournal
 	altsCount   bool
+	inheritance map[string][]string // source guild -> guilds inheriting from it
+	filters     InheritanceFilters
 	suspendErr  error
 	suspendCall int
 }
@@ -116,7 +118,7 @@ func newInviteWorld(t *testing.T) *inviteTestWorld {
 		for id, j := range w.journals {
 			list[id] = j
 		}
-		return inviteSuspensionsFrom(userID, groupID.String(), list, nil, w.altsCount)
+		return inviteSuspensionsFrom(userID, groupID.String(), list, w.inheritance, w.filters, w.altsCount)
 	}
 	inviteGuildAccess = func(_ context.Context, _ runtime.NakamaModule, userID string, _ uuid.UUID) (bool, error) {
 		return !w.noAccess[userID], nil
