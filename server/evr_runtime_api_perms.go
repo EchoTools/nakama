@@ -368,6 +368,8 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 //   - Global operators can see client IPs
 //   - Player location (client IPs, geohashes) is shown only to global operators and members of
 //     Global Private Data Access; everyone else gets RedactPlayerLocation()
+//   - A player in a match sees that match's public label plus its players (display name, team,
+//     user_id, discord_id): no endpoint, session, party or evr ids, reservations or client location
 //   - Public match label data is available for any guild the user is a member of
 //   - Suspended users see no match data except for servers they run
 func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.MatchList, in *api.ListMatchesRequest) error {
@@ -523,6 +525,10 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 		isAuditor = gg.IsAuditor(userID) || gg.IsEnforcer(userID)
 	}
 
+	// A player in the match (never a reservation: a held seat is not a
+	// participant) gets the public label plus a minimal players list.
+	isParticipant := label.HasParticipant(userID)
+
 	// Global operators can see all match data
 	canSeeFullData := isGlobalOperator || isServerHost || isAuditor
 
@@ -542,6 +548,8 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 			filteredLabel = filteredLabel.RedactPlayerLocation()
 		}
 		labelJSON, err = json.Marshal(filteredLabel)
+	} else if isParticipant {
+		labelJSON, err = json.Marshal(createParticipantMatchLabel(label))
 	} else if isMember || label.IsPublic() {
 		publicLabel := createPublicMatchLabel(label)
 		labelJSON, err = json.Marshal(publicLabel)
@@ -562,6 +570,20 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 		TickRate:      match.TickRate,
 		HandlerName:   match.HandlerName,
 	}
+}
+
+// HasParticipant reports whether userID is a connected player in the label's
+// Players. A reservation (a held seat) does not count.
+func (l *MatchLabel) HasParticipant(userID string) bool {
+	if l == nil || userID == "" {
+		return false
+	}
+	for _, p := range l.Players {
+		if !p.IsReservation && p.UserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 // PublicMatchLabel contains only publicly visible match information
@@ -620,6 +642,37 @@ func createPublicMatchLabel(label *MatchLabel) *PublicMatchLabel {
 	}
 
 	return public
+}
+
+// ParticipantPlayer is the only part of a player entry a fellow participant sees.
+type ParticipantPlayer struct {
+	DisplayName string    `json:"display_name,omitempty"`
+	Team        TeamIndex `json:"team"`
+	UserID      string    `json:"user_id,omitempty"`
+	DiscordID   string    `json:"discord_id,omitempty"`
+}
+
+// ParticipantMatchLabel is the public label plus the match's connected players,
+// as shown to a player in that match.
+type ParticipantMatchLabel struct {
+	*PublicMatchLabel
+	Players []ParticipantPlayer `json:"players"`
+}
+
+func createParticipantMatchLabel(label *MatchLabel) *ParticipantMatchLabel {
+	players := make([]ParticipantPlayer, 0, len(label.Players))
+	for _, p := range label.Players {
+		if p.IsReservation {
+			continue
+		}
+		players = append(players, ParticipantPlayer{
+			DisplayName: p.DisplayName,
+			Team:        p.Team,
+			UserID:      p.UserID,
+			DiscordID:   p.DiscordID,
+		})
+	}
+	return &ParticipantMatchLabel{PublicMatchLabel: createPublicMatchLabel(label), Players: players}
 }
 
 func createFullMatchLabel(label *MatchLabel, includeClientIPs bool) *MatchLabel {
