@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -70,17 +69,29 @@ func (p *EvrPipeline) lobbyJoin(ctx context.Context, logger *zap.Logger, session
 	switch label.Mode {
 	case evr.ModeSocialPublic, evr.ModeSocialPrivate:
 
-		if !slices.Contains([]int{evr.TeamUnassigned, evr.TeamModerator, evr.TeamSocial}, lobbyParams.Role) {
-			return fmt.Errorf("invalid role for social lobby: %d", lobbyParams.Role)
-		}
-
-		if lobbyParams.Role == evr.TeamUnassigned {
-			lobbyParams.Role = evr.TeamSocial
+		if role := socialLobbyEntrantRole(lobbyParams.Role); role != lobbyParams.Role {
+			logger.Debug("Social lobby entrant role set to social",
+				zap.String("mid", matchID.UUID.String()),
+				zap.Int("requested_role", lobbyParams.Role),
+				zap.Int("role", role))
+			lobbyParams.Role = role
 		}
 	}
 
 	presence.RoleAlignment = lobbyParams.Role
 	return p.lobbyJoinEntrant(logger, session, label, presence)
+}
+
+// socialLobbyEntrantRole is the role an entrant takes in a social lobby. A social lobby has no
+// teams, so a team role carries no meaning there: the game client sends whatever team it was
+// started with (-lobbyteam), and a private social create from a client started with -lobbyteam 3
+// arrives as TeamBlue. Every role except TeamModerator becomes TeamSocial. The moderator claim
+// has already been verified against the lobby's guild by the caller.
+func socialLobbyEntrantRole(role int) int {
+	if role == evr.TeamModerator {
+		return evr.TeamModerator
+	}
+	return evr.TeamSocial
 }
 
 // lobbyJoinEntrant seats presence in the match label names. A refusal is returned, not answered:
