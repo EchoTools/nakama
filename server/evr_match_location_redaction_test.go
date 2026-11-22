@@ -16,6 +16,7 @@ import (
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -371,5 +372,160 @@ func TestRedactPlayerLocation_NilSafe(t *testing.T) {
 	}
 	if got := (&MatchLabel{}).RedactPlayerLocation(); got == nil || got.GameServer != nil || got.Players != nil {
 		t.Errorf("empty label changed shape: %+v", got)
+	}
+}
+
+// ownMatchPlayers returns the label's players entries from a filtered match
+// label, as the echovrce.com panel reads them.
+func ownMatchPlayers(t *testing.T, m *api.Match) []map[string]any {
+	t.Helper()
+	var doc struct {
+		Players []map[string]any `json:"players"`
+	}
+	if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), &doc); err != nil {
+		t.Fatalf("label is not JSON: %v", err)
+	}
+	return doc.Players
+}
+
+func ownMatchLabel(t *testing.T) (*MatchLabel, string) {
+	t.Helper()
+	label := newLocationTestLabel(t)
+	label.Players = append(label.Players, PlayerInfo{
+		UserID:        uuid.Must(uuid.NewV4()).String(),
+		Username:      "held-seat",
+		IsReservation: true,
+	})
+	return label, label.Players[0].UserID
+}
+
+// A player whose own user id is in Players sees that match's players, without
+// client IPs, geohashes or the server endpoint, though they are neither host,
+// auditor, operator nor even a member of the guild.
+func TestFilterMatchForUser_ParticipantSeesOwnMatchPlayers(t *testing.T) {
+	label, playerID := ownMatchLabel(t)
+	label.LobbyType = PrivateLobby // not public: only the participant rule can show it
+	nk := &locationLabelNK{label: label}
+
+	got := filterMatchForUser(nk.match(t), playerID, false, false, nil, map[string]bool{}, map[string]bool{})
+	if got == nil {
+		t.Fatal("participant got no match")
+	}
+	doc := got.GetLabel().GetValue()
+	players := ownMatchPlayers(t, got)
+	if len(players) == 0 || players[0]["user_id"] != playerID {
+		t.Fatalf("participant does not see their own player entry: %s", doc)
+	}
+	assertNoPlayerLocation(t, "filterMatchForUser participant", doc)
+	// createFullMatchLabel(label, false) clears the endpoint object; endpoint_id
+	// still carries the server's addresses for hosts and auditors today (not changed here).
+	if !strings.Contains(doc, `"endpoint":""`) {
+		t.Errorf("participant sees the server endpoint object: %s", doc)
+	}
+}
+
+// A reservation is a held seat, not a participant.
+func TestFilterMatchForUser_ReservationIsNotAParticipant(t *testing.T) {
+	label, _ := ownMatchLabel(t)
+	label.LobbyType = PrivateLobby
+	nk := &locationLabelNK{label: label}
+
+	if got := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, map[string]bool{}); got != nil {
+		t.Errorf("reservation holder saw a private match: %s", got.GetLabel().GetValue())
+	}
+}
+
+// Every other caller keeps today's view: no players in a public match.
+func TestFilterMatchForUser_NonParticipantSeesNoPlayers(t *testing.T) {
+	label, _ := ownMatchLabel(t)
+	nk := &locationLabelNK{label: label}
+	other := uuid.Must(uuid.NewV4()).String()
+
+	got := filterMatchForUser(nk.match(t), other, false, false, nil, map[string]bool{}, map[string]bool{label.GroupID.String(): true})
+	if got == nil {
+		t.Fatal("member got no public match")
+	}
+	if players := ownMatchPlayers(t, got); len(players) != 0 {
+		t.Errorf("non-participant sees players: %s", got.GetLabel().GetValue())
+	}
+}
+
+// The suspension check stays first: a suspended participant sees nothing.
+func TestFilterMatchForUser_SuspendedParticipantSeesNothing(t *testing.T) {
+	label, playerID := ownMatchLabel(t)
+	nk := &locationLabelNK{label: label}
+	gid := label.GroupID.String()
+
+	got := filterMatchForUser(nk.match(t), playerID, false, false, nil, map[string]bool{gid: true}, map[string]bool{gid: true})
+	if got != nil {
+		t.Errorf("suspended participant saw their match: %s", got.GetLabel().GetValue())
+	}
+}
+
+// listMatchesNK answers the hook's UserGroupsList with the caller's groups; a
+// GroupsGetId error makes the hook skip guild roles, as it does when they fail to load.
+type listMatchesNK struct {
+	locationLabelNK
+	groups []*api.UserGroupList_UserGroup
+}
+
+func (n *listMatchesNK) UserGroupsList(ctx context.Context, userID string, limit int, state *int, cursor string) ([]*api.UserGroupList_UserGroup, string, error) {
+	return n.groups, "", nil
+}
+
+func (n *listMatchesNK) GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error) {
+	return nil, io.EOF
+}
+
+func listMatchesViaHook(t *testing.T, label *MatchLabel, userID string, groups []*api.UserGroupList_UserGroup) []*api.Match {
+	t.Helper()
+	nk := &listMatchesNK{locationLabelNK: locationLabelNK{label: label}, groups: groups}
+	out := &api.MatchList{Matches: []*api.Match{nk.match(t)}}
+	if err := AfterListMatchesHook(matchRPCContext(userID), NewRuntimeGoLogger(zap.NewNop()), nil, nk, out, &api.ListMatchesRequest{}); err != nil {
+		t.Fatalf("AfterListMatchesHook: %v", err)
+	}
+	return out.Matches
+}
+
+func TestAfterListMatchesHook_ParticipantSeesOwnMatchPlayers(t *testing.T) {
+	label, playerID := ownMatchLabel(t)
+	matches := listMatchesViaHook(t, label, playerID, nil)
+	if len(matches) != 1 {
+		t.Fatalf("participant sees %d matches, want 1", len(matches))
+	}
+	players := ownMatchPlayers(t, matches[0])
+	if len(players) == 0 || players[0]["user_id"] != playerID {
+		t.Fatalf("participant does not see their own player entry: %s", matches[0].GetLabel().GetValue())
+	}
+	assertNoPlayerLocation(t, "AfterListMatchesHook participant", matches[0].GetLabel().GetValue())
+}
+
+func TestAfterListMatchesHook_NonParticipantSeesNoPlayers(t *testing.T) {
+	label, _ := ownMatchLabel(t)
+	matches := listMatchesViaHook(t, label, uuid.Must(uuid.NewV4()).String(), nil)
+	if len(matches) != 1 {
+		t.Fatalf("caller sees %d matches, want the 1 public match", len(matches))
+	}
+	if players := ownMatchPlayers(t, matches[0]); len(players) != 0 {
+		t.Errorf("non-participant sees players: %s", matches[0].GetLabel().GetValue())
+	}
+}
+
+// Operators are unchanged: players and their locations, as before.
+func TestAfterListMatchesHook_OperatorUnchanged(t *testing.T) {
+	label, _ := ownMatchLabel(t)
+	operator := []*api.UserGroupList_UserGroup{{
+		Group: &api.Group{Id: uuid.Must(uuid.NewV4()).String(), Name: GroupGlobalOperators},
+		State: wrapperspb.Int32(0),
+	}}
+	matches := listMatchesViaHook(t, label, uuid.Must(uuid.NewV4()).String(), operator)
+	if len(matches) != 1 {
+		t.Fatalf("operator sees %d matches, want 1", len(matches))
+	}
+	doc := matches[0].GetLabel().GetValue()
+	for _, want := range []string{testLocPlayerIP, testLocPlayerGeoHash} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("operator lost %q: %s", want, doc)
+		}
 	}
 }

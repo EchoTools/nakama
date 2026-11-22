@@ -368,6 +368,7 @@ func registerAPIGuards(initializer runtime.Initializer) error {
 //   - Global operators can see client IPs
 //   - Player location (client IPs, geohashes) is shown only to global operators and members of
 //     Global Private Data Access; everyone else gets RedactPlayerLocation()
+//   - A player in a match sees that match's full label, with client IPs and player location redacted
 //   - Public match label data is available for any guild the user is a member of
 //   - Suspended users see no match data except for servers they run
 func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.MatchList, in *api.ListMatchesRequest) error {
@@ -523,8 +524,13 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 		isAuditor = gg.IsAuditor(userID) || gg.IsEnforcer(userID)
 	}
 
+	// A player in the match sees that match's full label (never a reservation:
+	// a held seat is not a participant). Client IPs and player locations stay
+	// redacted below unless the caller has those permissions on their own.
+	isParticipant := label.HasParticipant(userID)
+
 	// Global operators can see all match data
-	canSeeFullData := isGlobalOperator || isServerHost || isAuditor
+	canSeeFullData := isGlobalOperator || isServerHost || isAuditor || isParticipant
 
 	// Can see the server endpoint only if global operator
 	canSeeClientIPs := isGlobalOperator
@@ -562,6 +568,20 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 		TickRate:      match.TickRate,
 		HandlerName:   match.HandlerName,
 	}
+}
+
+// HasParticipant reports whether userID is a connected player in the label's
+// Players. A reservation (a held seat) does not count.
+func (l *MatchLabel) HasParticipant(userID string) bool {
+	if l == nil || userID == "" {
+		return false
+	}
+	for _, p := range l.Players {
+		if !p.IsReservation && p.UserID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 // PublicMatchLabel contains only publicly visible match information
