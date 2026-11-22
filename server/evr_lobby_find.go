@@ -964,6 +964,13 @@ func (p *EvrPipeline) lobbyFindOrCreateSocial(ctx context.Context, logger *zap.L
 					logger.Debug("Pre-join ping failed, skipping server.", zap.String("endpoint", l.GameServer.Endpoint.String()))
 					continue
 				}
+				// The candidate was listed and then ended (terminating or terminated)
+				// before the join reached it. That says nothing about the other
+				// candidates, so try the next one instead of ending the search (#747).
+				if LobbyErrorCode(err) == ServerDoesNotExist {
+					logger.Debug("Match no longer exists, skipping.")
+					continue
+				}
 				return fmt.Errorf("failed to join existing social lobby: %w", err)
 			}
 			return nil
