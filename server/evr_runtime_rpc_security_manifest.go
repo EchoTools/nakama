@@ -86,6 +86,21 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		guildGroupMap = map[string]*GuildGroup{}
 	}
 
+	// canManageGuild can reach Discord, so each guild is asked once per call.
+	manageCache := make(map[string]bool, len(guildGroupMap))
+	canManage := func(groupID string) bool {
+		gg := guildGroupMap[groupID]
+		if gg == nil {
+			return false
+		}
+		if v, ok := manageCache[groupID]; ok {
+			return v
+		}
+		v := canManageGuild(ctx, logger, nk, guildPermissionSourceOrNil(), gg, userID)
+		manageCache[groupID] = v
+		return v
+	}
+
 	selectedGuildID := req.GuildID
 	if selectedGuildID != "" {
 		// Validate that the requested guild exists in the user's guild memberships.
@@ -100,14 +115,28 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 			groupIDs = append(groupIDs, groupID)
 		}
 		slices.Sort(groupIDs)
+		// A guild the user owns or can manage comes first, then a guild where they
+		// hold enforcer, allocator or auditor; each pass goes by group id.
 		for _, groupID := range groupIDs {
 			gg := guildGroupMap[groupID]
 			if gg == nil {
 				continue
 			}
-			if gg.IsOwner(userID) || gg.IsEnforcer(userID) || gg.IsAllocator(userID) || gg.IsAuditor(userID) {
+			if gg.IsOwner(userID) || canManage(groupID) {
 				selectedGuildID = groupID
 				break
+			}
+		}
+		if selectedGuildID == "" {
+			for _, groupID := range groupIDs {
+				gg := guildGroupMap[groupID]
+				if gg == nil {
+					continue
+				}
+				if gg.IsEnforcer(userID) || gg.IsAllocator(userID) || gg.IsAuditor(userID) {
+					selectedGuildID = groupID
+					break
+				}
 			}
 		}
 		if selectedGuildID == "" && len(groupIDs) > 0 {
@@ -172,9 +201,9 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 
 	// Computed once; guild.manage and guild.roles.update both use it. Both mirror the
 	// guild-management RPC gate (canManageGuild); the enforcer role does not grant them.
-	canManage := selectedGuild != nil && canManageGuild(ctx, logger, nk, guildPermissionSourceOrNil(), selectedGuild, userID)
-	resp.Capabilities["guild.manage"] = isOperator || isOwner || canManage
-	resp.Capabilities["guild.roles.update"] = isOperator || isOwner || canManage
+	canManageSelected := selectedGuild != nil && canManage(selectedGuildID)
+	resp.Capabilities["guild.manage"] = isOperator || isOwner || canManageSelected
+	resp.Capabilities["guild.roles.update"] = isOperator || isOwner || canManageSelected
 	resp.Capabilities["guild.transfer"] = isOperator || isOwner
 
 	resp.Capabilities["account.search"] = true
