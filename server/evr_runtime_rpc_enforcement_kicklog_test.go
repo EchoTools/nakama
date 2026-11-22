@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -63,6 +63,7 @@ type kickLogFixture struct {
 	groupID    string
 	enforcerID string
 	targetID   string
+	realKick   func(context.Context, *zap.Logger, runtime.NakamaModule, string, []string) error
 }
 
 func newKickLogFixture(t *testing.T) *kickLogFixture {
@@ -74,6 +75,11 @@ func newKickLogFixture(t *testing.T) *kickLogFixture {
 		enforcerID: uuid.Must(uuid.NewV4()).String(),
 		targetID:   uuid.Must(uuid.NewV4()).String(),
 	}
+	// The default kick needs the runtime module's session registry; the fixture's module is
+	// a mock, so the kick is stood in with a no-op. Tests of the kick restore f.realKick.
+	f.realKick = enforceGuildSuspensionFn
+	enforceGuildSuspensionFn = func(context.Context, *zap.Logger, runtime.NakamaModule, string, []string) error { return nil }
+	t.Cleanup(func() { enforceGuildSuspensionFn = f.realKick })
 	f.nk = &kickLogNakamaModule{
 		mockEnforcementNakamaModule: newMockEnforcementNakamaModule(),
 		accounts: map[string]*api.Account{
@@ -206,7 +212,6 @@ func TestEnforcementKickRPC_FailedLookupPostsNothing(t *testing.T) {
 	}{
 		{"enforcer account lookup fails", func(f *kickLogFixture) { f.nk.accountErr[f.enforcerID] = errors.New("db down") }},
 		{"target account lookup fails", func(f *kickLogFixture) { f.nk.accountErr[f.targetID] = errors.New("db down") }},
-		{"enforcer has no Discord ID", func(f *kickLogFixture) { f.nk.accounts[f.enforcerID].CustomId = "" }},
 		{"target has no Discord ID", func(f *kickLogFixture) { f.nk.accounts[f.targetID].CustomId = "" }},
 	}
 	for _, tt := range tests {
@@ -249,22 +254,17 @@ func TestEnforcementKickRPC_NoDiscordBotDoesNotCrash(t *testing.T) {
 	}
 }
 
-// blockingNoticeSender never answers until its context ends, as a stalled Discord would.
-type blockingNoticeSender struct{ called chan struct{} }
+// stuckNoticeSender ignores its context and blocks until the test releases it, as a call
+// stuck below the HTTP layer would. Only the RPC's own wait can bound the request.
+type stuckNoticeSender struct {
+	called  chan struct{}
+	release chan struct{}
+}
 
-func (b *blockingNoticeSender) ChannelMessageSendComplex(_ string, _ *discordgo.MessageSend, opts ...discordgo.RequestOption) (*discordgo.Message, error) {
+func (b *stuckNoticeSender) ChannelMessageSendComplex(string, *discordgo.MessageSend, ...discordgo.RequestOption) (*discordgo.Message, error) {
 	close(b.called)
-	// Honour the request context the way discordgo does: apply the options to a request.
-	httpReq, err := http.NewRequest(http.MethodPost, "http://discord.invalid/", nil)
-	if err != nil {
-		return nil, err
-	}
-	cfg := &discordgo.RequestConfig{Request: httpReq}
-	for _, o := range opts {
-		o(cfg)
-	}
-	<-cfg.Request.Context().Done()
-	return nil, cfg.Request.Context().Err()
+	<-b.release
+	return &discordgo.Message{}, nil
 }
 
 func TestEnforcementKickRPC_SlowDiscordIsBounded(t *testing.T) {
@@ -273,22 +273,180 @@ func TestEnforcementKickRPC_SlowDiscordIsBounded(t *testing.T) {
 	t.Cleanup(func() { suspensionLogTimeout = orig })
 
 	f := newKickLogFixture(t)
-	s := &blockingNoticeSender{called: make(chan struct{})}
+	s := &stuckNoticeSender{called: make(chan struct{}), release: make(chan struct{})}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(s.release)
+		}
+	}
+	t.Cleanup(release)
 	useSuspensionLogSender(t, s)
 
-	start := time.Now()
-	resp := runKickRPC(t, f, f.payload(""))
-	elapsed := time.Since(start)
+	type result struct {
+		resp EnforcementKickResponse
+		err  error
+	}
+	returned := make(chan result, 1)
+	go func() {
+		out, err := EnforcementKickRPC(f.ctx, NewRuntimeGoLogger(zap.NewNop()), nil, f.nk, f.payload(""))
+		var r result
+		r.err = err
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &r.resp)
+			r.err = err
+		}
+		returned <- r
+	}()
 
+	// The sender is still blocked (it is released only below), so the RPC returning proves
+	// it stopped waiting at the timeout.
+	select {
+	case r := <-returned:
+		if r.err != nil {
+			t.Fatalf("EnforcementKickRPC: %v", r.err)
+		}
+		if !r.resp.Success || r.resp.PostedToSuspensionLog {
+			t.Fatalf("want success=true posted=false, got %+v", r.resp)
+		}
+	case <-time.After(5 * time.Second):
+		release()
+		t.Fatal("the RPC was held by a sender that ignores its context")
+	}
 	select {
 	case <-s.called:
 	default:
 		t.Fatal("the sender was never called")
 	}
-	if elapsed > 5*time.Second {
-		t.Fatalf("the RPC was held %v by a stalled Discord", elapsed)
+	release()
+}
+
+func TestEnforcementKickRPC_EnforcerWithoutDiscordIDPostsByName(t *testing.T) {
+	f := newKickLogFixture(t)
+	s := &fakeNoticeSender{}
+	useSuspensionLogSender(t, s)
+	f.nk.accounts[f.enforcerID] = &api.Account{User: &api.User{Id: f.enforcerID, Username: "svc_bot"}}
+
+	resp := runKickRPC(t, f, f.payload(""))
+
+	if !resp.PostedToSuspensionLog || len(s.messages) != 1 {
+		t.Fatalf("a service account's kick must still be logged, got posts=%d resp=%+v", len(s.messages), resp)
 	}
-	if !resp.Success || resp.PostedToSuspensionLog {
-		t.Fatalf("want success=true posted=false, got %+v", resp)
+	embed := s.messages[0].Embed
+	text := embed.Author.Name + embed.Title + embed.Description
+	for _, f := range embed.Fields {
+		text += f.Name + f.Value
+	}
+	if !strings.Contains(embed.Author.Name, "svc_bot") {
+		t.Fatalf("the card should name the enforcer by account name, got %q", embed.Author.Name)
+	}
+	if strings.Contains(text, "<@!>") {
+		t.Fatalf("the card must not carry an empty mention: %q", text)
+	}
+}
+
+func TestEnforcementKickRPC_EnforcerWithNoNamePostsNothing(t *testing.T) {
+	f := newKickLogFixture(t)
+	s := &fakeNoticeSender{}
+	useSuspensionLogSender(t, s)
+	f.nk.accounts[f.enforcerID] = &api.Account{User: &api.User{Id: f.enforcerID}}
+
+	resp := runKickRPC(t, f, f.payload(""))
+
+	if len(s.messages) != 0 || !resp.Success || resp.PostedToSuspensionLog {
+		t.Fatalf("an unnamed enforcer must not post; posts=%d resp=%+v", len(s.messages), resp)
+	}
+}
+
+// With the real resolver and a registry that knows the group, the card names the group,
+// not its ID. The resolver's sender is swapped for a fake after the real resolver ran.
+func TestEnforcementKickRPC_RealResolverNamesTheGroup(t *testing.T) {
+	prev := globalAppBot.Load()
+	t.Cleanup(func() { globalAppBot.Store(prev) })
+
+	f := newKickLogFixture(t)
+	gg, err := NewGuildGroup(&api.Group{Id: f.groupID, Name: "Echo Guild", LangTag: "guild", Metadata: `{"guild_id":"guild-discord-id"}`}, nil)
+	if err != nil {
+		t.Fatalf("NewGuildGroup: %v", err)
+	}
+	registry := &GuildGroupRegistry{
+		guildGroups:    atomic.NewPointer(&map[string]*GuildGroup{}),
+		inheritanceMap: atomic.NewPointer(&map[string][]string{}),
+	}
+	registry.Add(gg)
+	dg := &discordgo.Session{}
+	globalAppBot.Store(&DiscordAppBot{dg: dg, guildGroupRegistry: registry})
+
+	target := resolveSuspensionLogTarget()
+	if target == nil || target.sender != enforcementNoticeSender(dg) {
+		t.Fatalf("the real resolver should target the bot's session, got %+v", target)
+	}
+	if got := target.groupName(f.groupID); got != "Echo Guild" {
+		t.Fatalf("groupName(%s) = %q, want the registry's name", f.groupID, got)
+	}
+	if got := target.groupName("unknown"); got != "" {
+		t.Fatalf("an unknown group must have no name, got %q", got)
+	}
+
+	s := &fakeNoticeSender{}
+	real := resolveSuspensionLogTarget
+	resolveSuspensionLogTarget = func() *suspensionLogTarget {
+		tg := real()
+		tg.sender = s
+		return tg
+	}
+	t.Cleanup(func() { resolveSuspensionLogTarget = real })
+
+	resp := runKickRPC(t, f, f.payload(""))
+
+	if !resp.PostedToSuspensionLog || len(s.messages) != 1 {
+		t.Fatalf("want one post, got %d resp=%+v", len(s.messages), resp)
+	}
+	var names string
+	for _, fld := range s.messages[0].Embed.Fields {
+		names += fld.Name + fld.Value
+	}
+	if !strings.Contains(names, "Echo Guild") || strings.Contains(names, f.groupID) {
+		t.Fatalf("the card should carry the group name, not its ID: %q", names)
+	}
+}
+
+// The kick itself is the seam: a module that is not the runtime module cannot reach the
+// session registry, so the RPC refuses rather than report a kick that did not happen.
+func TestEnforcementKickRPC_RefusesWhenTheKickCannotRun(t *testing.T) {
+	f := newKickLogFixture(t)
+	s := &fakeNoticeSender{}
+	useSuspensionLogSender(t, s)
+	enforceGuildSuspensionFn = f.realKick
+
+	out, err := EnforcementKickRPC(f.ctx, NewRuntimeGoLogger(zap.NewNop()), nil, f.nk, f.payload(""))
+	if err == nil {
+		t.Fatalf("a kick that could not run must be refused, got success: %s", out)
+	}
+	if len(s.messages) != 0 {
+		t.Fatalf("a refused kick must not be posted, got %d", len(s.messages))
+	}
+}
+
+func TestEnforcementKickRPC_KicksTheTargetFromTheGuildAndItsInheritors(t *testing.T) {
+	f := newKickLogFixture(t)
+	useSuspensionLogSender(t, &fakeNoticeSender{})
+	var gotUser string
+	var gotGuilds []string
+	orig := enforceGuildSuspensionFn
+	enforceGuildSuspensionFn = func(_ context.Context, _ *zap.Logger, _ runtime.NakamaModule, userID string, guildIDs []string) error {
+		gotUser, gotGuilds = userID, guildIDs
+		return nil
+	}
+	t.Cleanup(func() { enforceGuildSuspensionFn = orig })
+
+	resp := runKickRPC(t, f, f.payload(""))
+
+	if gotUser != f.targetID || len(gotGuilds) == 0 || gotGuilds[0] != f.groupID {
+		t.Fatalf("kick called with user=%q guilds=%v", gotUser, gotGuilds)
+	}
+	if !resp.Success || !strings.Contains(strings.Join(resp.Actions, "|"), "kicked from current match") {
+		t.Fatalf("want the kick reported, got %+v", resp)
 	}
 }

@@ -228,10 +228,11 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		if gg != nil && gg.SuspensionInheritanceGroupIDs != nil {
 			suspendedGuildIDs = append(suspendedGuildIDs, gg.SuspensionInheritanceGroupIDs...)
 		}
-		if _nk, ok := nk.(*RuntimeGoNakamaModule); ok {
-			EnforceGuildSuspension(ctx, RuntimeLoggerToZapLogger(logger), nk, _nk.sessionRegistry, targetUserID, suspendedGuildIDs)
-		} else {
-			LogWarn(logger, "Nakama module is not the runtime module; sessions not kicked", zap.String("target_user_id", targetUserID))
+		if err := enforceGuildSuspensionFn(ctx, RuntimeLoggerToZapLogger(logger), nk, targetUserID, suspendedGuildIDs); err != nil {
+			// The journal is saved, so the suspension holds at the next join, but the
+			// player was not removed from their match: do not report a kick.
+			LogError(logger, "Failed to kick the player from their matches", zap.Error(err), zap.String("target_user_id", targetUserID))
+			return "", runtime.NewError("Enforcement recorded but the player could not be kicked from their matches", StatusInternalError)
 		}
 		actions = append(actions, "kicked from current match")
 		cnt = len(presences)
@@ -585,6 +586,18 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	return string(responseData), nil
 }
 
+// enforceGuildSuspensionFn kicks the player from the matches of the suspended guilds. It is
+// a variable so tests can observe the kick without a session registry; production always
+// runs the default, which refuses any module that is not the runtime module.
+var enforceGuildSuspensionFn = func(ctx context.Context, logger *zap.Logger, nk runtime.NakamaModule, userID string, guildGroupIDs []string) error {
+	rnk, ok := nk.(*RuntimeGoNakamaModule)
+	if !ok {
+		return fmt.Errorf("nakama module is %T, not the runtime module: cannot reach the session registry", nk)
+	}
+	EnforceGuildSuspension(ctx, logger, nk, rnk.sessionRegistry, userID, guildGroupIDs)
+	return nil
+}
+
 // suspensionLogTimeout bounds the whole suspension-log post (the lookups and the Discord
 // call), so a slow Discord cannot hold the portal's response.
 var suspensionLogTimeout = 3 * time.Second
@@ -685,8 +698,10 @@ func sendKickToSuspensionLog(ctx context.Context, logger runtime.Logger, nk runt
 	if in.ActorName == "" {
 		in.ActorName = in.ActorUsername
 	}
-	if in.ActorName == "" || in.ActorDiscordID == "" {
-		LogWarn(logger, "Enforcer account has no name or Discord ID; kick not posted to the suspension log", zap.String("enforcer_user_id", enforcerUserID))
+	// A bot or service account has no Discord ID: the card names it by its account name
+	// and carries no mention. With no name either, nothing identifies the enforcer.
+	if in.ActorName == "" {
+		LogWarn(logger, "Enforcer account has no name; kick not posted to the suspension log", zap.String("enforcer_user_id", enforcerUserID))
 		return false
 	}
 

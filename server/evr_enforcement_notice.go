@@ -51,9 +51,18 @@ func buildEnforcementNotice(in enforcementNoticeInput) (*discordgo.MessageEmbed,
 		descParts = append(descParts, "🚫 **Private lobbies: not allowed**")
 	}
 
+	actorLabel := fmt.Sprintf("%s (%s)", in.ActorName, in.ActorUsername)
+	if in.ActorUsername == "" {
+		actorLabel = in.ActorName
+	}
+	actorRef := in.ActorName
+	if in.ActorDiscordID != "" {
+		actorRef = fmt.Sprintf("<@!%s>", in.ActorDiscordID)
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{
-			Name:    fmt.Sprintf("%s (%s)", in.ActorName, in.ActorUsername),
+			Name:    actorLabel,
 			IconURL: in.ActorIconURL,
 		},
 		Title:       title,
@@ -68,7 +77,7 @@ func buildEnforcementNotice(in enforcementNoticeInput) (*discordgo.MessageEmbed,
 	if len(in.RecordsByGroupID) == 0 {
 		// this is just a kick.
 		parts := []string{
-			fmt.Sprintf("<t:%d:R> by <@!%s>:", in.Now.UTC().Unix(), in.ActorDiscordID),
+			fmt.Sprintf("<t:%d:R> by %s:", in.Now.UTC().Unix(), actorRef),
 			fmt.Sprintf("- `%s`", in.UserNotice),
 		}
 		if in.Notes != "" && !in.RestrictNotes {
