@@ -48,6 +48,10 @@ func defaultSecurityCapabilities() map[string]bool {
 	}
 }
 
+// securityManifestManageChecks is the most guilds the manifest asks canManageGuild
+// about when it picks a guild for a caller who named none.
+const securityManifestManageChecks = 10
+
 func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
 	resp := SecurityManifestResponse{
 		Capabilities: defaultSecurityCapabilities(),
@@ -118,13 +122,17 @@ func SecurityManifestRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 		// A guild the user owns or can manage comes first, then a guild where they
 		// hold enforcer, allocator or auditor; each pass goes by group id.
 		for _, groupID := range groupIDs {
-			gg := guildGroupMap[groupID]
-			if gg == nil {
-				continue
-			}
-			if gg.IsOwner(userID) || canManage(groupID) {
+			if gg := guildGroupMap[groupID]; gg != nil && gg.IsOwner(userID) {
 				selectedGuildID = groupID
 				break
+			}
+		}
+		for i, groupID := range groupIDs {
+			if selectedGuildID != "" || i >= securityManifestManageChecks {
+				break
+			}
+			if canManage(groupID) {
+				selectedGuildID = groupID
 			}
 		}
 		if selectedGuildID == "" {
