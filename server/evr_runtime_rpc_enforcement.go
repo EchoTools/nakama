@@ -222,12 +222,17 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 		return "", runtime.NewError("Failed to save enforcement data", StatusInternalError)
 	}
 
-	// Tell the guilds that inherit this suspension (#818). The RPC posts no notice
-	// of its own in the issuing guild, but sendRPCAuditMessage at the end posts to
-	// that guild's audit channel. The notify is deferred so it runs after that post
-	// and skips the channel only if the post actually went there; every return
-	// path below reaches it, and it posts asynchronously.
-	var auditPostedChannelID string
+	// Tell the guilds that inherit this suspension (#818). The RPC posts two things
+	// in the issuing guild: the portal-kick card to its enforcement-notice channel
+	// (postKickToSuspensionLog) and the audit line to its audit channel
+	// (sendRPCAuditMessage). The notify is deferred so it runs after both posts and
+	// skips a channel only if the post actually went there; every return path below
+	// reaches it, and it posts asynchronously.
+	//
+	// Known gap: a card whose post outlasts suspensionLogTimeout is reported as not
+	// posted, so an inheriting guild sharing that channel is told too and, if the late
+	// post then lands, sees a second message there.
+	var auditPostedChannelID, noticePostedChannelID string
 	if addedRecord != nil {
 		appBot := globalAppBot.Load()
 		if appBot == nil || appBot.guildGroupRegistry == nil {
@@ -241,6 +246,9 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 				var posted []string
 				if auditPostedChannelID != "" {
 					posted = append(posted, auditPostedChannelID)
+				}
+				if noticePostedChannelID != "" {
+					posted = append(posted, noticePostedChannelID)
 				}
 				appBot.notifyInheritingGuilds(ctx, RuntimeLoggerToZapLogger(logger), src, *addedRecord, targetUserID, "", posted)
 			}()
@@ -284,6 +292,9 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	// The post is bounded by suspensionLogTimeout, so a slow Discord delays the response
 	// and the audit message by at most that long.
 	response.PostedToSuspensionLog = postKickToSuspensionLog(ctx, logger, nk, request, gg, enforcerUserID, targetUserID, kickPlayer, recordsByGroupID, voids)
+	if response.PostedToSuspensionLog {
+		noticePostedChannelID = gg.EnforcementNoticeChannelID
+	}
 
 	responseData, err := json.Marshal(response)
 	if err != nil {

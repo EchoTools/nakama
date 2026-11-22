@@ -707,3 +707,107 @@ func countOf(channels []string, id string) int {
 	}
 	return n
 }
+
+// portalSender stands in for the Discord session the portal-kick card goes through.
+// It records each post by channel and can fail or block a channel.
+type portalSender struct {
+	rec     *channelRecorder
+	failOn  map[string]bool
+	blockOn map[string]chan struct{}
+}
+
+func (p *portalSender) ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	if ch := p.blockOn[channelID]; ch != nil {
+		<-ch
+	}
+	if p.failOn[channelID] {
+		return nil, errors.New("missing access")
+	}
+	if err := p.rec.send(channelID, data); err != nil {
+		return nil, err
+	}
+	return &discordgo.Message{ID: "1", ChannelID: channelID}, nil
+}
+
+// shareNoticeChannel configures B with only A's enforcement-notice channel, so a B
+// notice would land where A's portal card goes. It returns the channel id.
+func (f *entryFixture) shareNoticeChannel(t *testing.T) string {
+	t.Helper()
+	const shared = "chan-a-notice"
+	b := f.registry.GuildGroups()[inChildID]
+	b.EnforcementNoticeChannelID, b.AuditChannelID = shared, ""
+	return shared
+}
+
+// The RPC's portal-kick card goes to A's enforcement-notice channel. B, configured
+// with that channel, is not told there a second time: one post in the channel.
+func TestInheritedNoticeEntry_KickRPC_PortalCardChannelPostedOnce(t *testing.T) {
+	f := newEntryFixture(t, SuspensionInheritanceFilter{})
+	shared := f.shareNoticeChannel(t)
+	portal := &channelRecorder{}
+	useSuspensionLogSender(t, &portalSender{rec: portal})
+	bot := f.bot()
+
+	out := f.rpc(t, bot, kickPayload(inSrcID, "30d"))
+	bot.noticeWG.Wait()
+
+	var resp EnforcementKickResponse
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.PostedToSuspensionLog {
+		t.Fatalf("the portal card was not posted; the test setup is wrong: %s", out)
+	}
+	all := append(portal.channels(), f.rec.channels()...)
+	if n := countOf(all, shared); n != 1 {
+		t.Fatalf("shared notice channel received %d posts, want 1 (A's card): card %v, notices %v", n, portal.channels(), f.rec.channels())
+	}
+	if f.rec.to("chan-c-audit") == nil {
+		t.Fatalf("C must still be told: %v", f.rec.channels())
+	}
+}
+
+// When the portal post fails or times out, the card is not in the channel as far as
+// the RPC knows, so B is told there.
+func TestInheritedNoticeEntry_KickRPC_FailedPortalPostStillTellsSharingGuild(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block bool
+	}{
+		{"post refused", false},
+		{"post times out", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newEntryFixture(t, SuspensionInheritanceFilter{})
+			shared := f.shareNoticeChannel(t)
+			portal := &channelRecorder{}
+			sender := &portalSender{rec: portal}
+			if tc.block {
+				release := make(chan struct{})
+				sender.blockOn = map[string]chan struct{}{shared: release}
+				t.Cleanup(func() { close(release) })
+				old := suspensionLogTimeout
+				suspensionLogTimeout = 50 * time.Millisecond
+				t.Cleanup(func() { suspensionLogTimeout = old })
+			} else {
+				sender.failOn = map[string]bool{shared: true}
+			}
+			useSuspensionLogSender(t, sender)
+			bot := f.bot()
+
+			out := f.rpc(t, bot, kickPayload(inSrcID, "30d"))
+			bot.noticeWG.Wait()
+
+			var resp EnforcementKickResponse
+			if err := json.Unmarshal([]byte(out), &resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp.PostedToSuspensionLog {
+				t.Fatalf("the portal post should have failed: %s", out)
+			}
+			if f.rec.to(shared) == nil {
+				t.Fatalf("the portal card did not land, so B must be told in the shared channel: card %v, notices %v", portal.channels(), f.rec.channels())
+			}
+		})
+	}
+}
