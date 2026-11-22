@@ -45,7 +45,7 @@ func enforceJoinSuspension(ctx context.Context, logger *zap.Logger, nk runtime.N
 		return NewLobbyError(KickedFromLobbyGroup, "unable to verify suspension status")
 	}
 
-	enforcements, err := CheckEnforcementSuspensions(journals, ggRegistry.InheritanceByParentGroupID())
+	enforcements, err := CheckEnforcementSuspensions(journals, ggRegistry.InheritanceByParentGroupID(), ggRegistry.InheritanceFilters())
 	if err != nil {
 		logger.Error("seat enforcement: failed to check suspensions",
 			zap.String("uid", userID), zap.String("gid", groupIDStr), zap.Error(err))
@@ -68,7 +68,7 @@ func enforceJoinSuspension(ctx context.Context, logger *zap.Logger, nk runtime.N
 	// toggles discard the alt's, the player's own suspension still applies.
 	if record.UserID != userID {
 		if params.ignoreSuspensionsOfAltAccounts || (gg != nil && !gg.RejectPlayersWithSuspendedAlternates) {
-			ownEnforcements, err := CheckOwnEnforcementSuspensions(userID, journals, ggRegistry.InheritanceByParentGroupID())
+			ownEnforcements, err := CheckOwnEnforcementSuspensions(userID, journals, ggRegistry.InheritanceByParentGroupID(), ggRegistry.InheritanceFilters())
 			if err != nil {
 				logger.Error("seat enforcement: failed to check own suspensions",
 					zap.String("uid", userID), zap.String("gid", groupIDStr), zap.Error(err))

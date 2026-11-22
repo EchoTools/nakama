@@ -198,7 +198,7 @@ func TestSyncFromJournal_AffectedModesAgreeWithAuthority(t *testing.T) {
 			false, allowPrivate, 24*time.Hour)
 
 		authoritative, err := CheckEnforcementSuspensions(
-			GuildEnforcementJournalList{userID: journal}, nil)
+			GuildEnforcementJournalList{userID: journal}, nil, nil)
 		require.NoError(t, err)
 
 		wantModes := make([]string, 0)
@@ -260,7 +260,7 @@ func TestSyncFromJournal_VoidedExclusionMatchesAuthority(t *testing.T) {
 	voided := journal.AddRecord(groupID, "enforcer", "1234", "Retracted ban", "", false, false, 24*time.Hour)
 	journal.VoidRecord(groupID, voided.ID, "moderator", "5678", "issued in error")
 
-	authoritative, err := CheckEnforcementSuspensions(GuildEnforcementJournalList{userID: journal}, nil)
+	authoritative, err := CheckEnforcementSuspensions(GuildEnforcementJournalList{userID: journal}, nil, nil)
 	require.NoError(t, err)
 	require.Empty(t, authoritative[groupID],
 		"precondition: the authority treats a fully-voided journal as carrying no active suspension")
@@ -295,7 +295,7 @@ func TestSyncFromJournal_DoesNotApplyInheritance(t *testing.T) {
 	// The authority, given an inheritance map, DOES fan the suspension out to
 	// the child guild. This is the behaviour the projection deliberately omits.
 	inheritance := map[string][]string{parentGroupID: {childGroupID}}
-	authoritative, err := CheckEnforcementSuspensions(GuildEnforcementJournalList{userID: journal}, inheritance)
+	authoritative, err := CheckEnforcementSuspensions(GuildEnforcementJournalList{userID: journal}, inheritance, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, authoritative[childGroupID],
 		"precondition: the authority DOES apply inheritance to the child guild")

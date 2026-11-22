@@ -815,7 +815,7 @@ func (p *EvrPipeline) authorizeSession(ctx context.Context, logger *zap.Logger, 
 		return fmt.Errorf("failed to load enforcement journals: %w", err)
 	}
 	inheritanceMap := p.guildGroupRegistry.InheritanceByParentGroupID()
-	if params.gameModeSuspensionsByGroupID, err = CheckEnforcementSuspensions(journals, inheritanceMap); err != nil {
+	if params.gameModeSuspensionsByGroupID, err = CheckEnforcementSuspensions(journals, inheritanceMap, p.guildGroupRegistry.InheritanceFilters()); err != nil {
 		metricsTags["error"] = "failed_check_suspensions"
 		return fmt.Errorf("failed to check suspensions: %w", err)
 	}

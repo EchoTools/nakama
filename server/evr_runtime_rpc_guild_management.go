@@ -99,6 +99,9 @@ func GuildGroupUpdateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	if req.Metadata != nil {
 		req.Metadata.GuildID = gg.GuildID
 		req.Metadata.OwnerID = gg.OwnerID
+		if err := req.Metadata.ValidateSuspensionInheritanceFilters(); err != nil {
+			return "", runtime.NewError(err.Error(), 3)
+		}
 		_nk, ok := nk.(*RuntimeGoNakamaModule)
 		if !ok {
 			return "", runtime.NewError("internal error", 13)

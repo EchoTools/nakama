@@ -577,7 +577,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 		p.logger.Error("failed to re-read enforcement journals at join time; denying join", zap.String("user_id", userID), zap.Error(freshJournalErr))
 		return fmt.Errorf("failed to re-read enforcement journals: %w", freshJournalErr)
 	}
-	freshEnforcements, freshErr := CheckEnforcementSuspensions(freshJournals, p.guildGroupRegistry.InheritanceByParentGroupID())
+	freshEnforcements, freshErr := CheckEnforcementSuspensions(freshJournals, p.guildGroupRegistry.InheritanceByParentGroupID(), p.guildGroupRegistry.InheritanceFilters())
 	if freshErr != nil {
 		p.logger.Error("failed to check fresh enforcement suspensions at join time; denying join", zap.String("user_id", userID), zap.Error(freshErr))
 		return fmt.Errorf("failed to check enforcement suspensions: %w", freshErr)
@@ -586,7 +586,7 @@ func (p *EvrPipeline) lobbyAuthorize(ctx context.Context, logger *zap.Logger, se
 	// The merged result keeps one record per (group, mode): whichever expires
 	// last, the player's or an alt's. The alt settings below discard alt records,
 	// and must not discard the player's own suspension along with them.
-	freshOwnEnforcements, freshOwnErr := CheckOwnEnforcementSuspensions(userID, freshJournals, p.guildGroupRegistry.InheritanceByParentGroupID())
+	freshOwnEnforcements, freshOwnErr := CheckOwnEnforcementSuspensions(userID, freshJournals, p.guildGroupRegistry.InheritanceByParentGroupID(), p.guildGroupRegistry.InheritanceFilters())
 	if freshOwnErr != nil {
 		p.logger.Error("failed to check own enforcement suspensions at join time; denying join", zap.String("user_id", userID), zap.Error(freshOwnErr))
 		return fmt.Errorf("failed to check enforcement suspensions: %w", freshOwnErr)
