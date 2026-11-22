@@ -232,6 +232,10 @@ func (b *PostMatchmakerBackfill) findBestBackfillMatchOptimized(
 		if candidateServerBlacklisted(candidate, match.externalIP) {
 			continue
 		}
+		// A member's join expired from this match recently: the match removed them, so do not place them back.
+		if candidateExpiredFrom(candidate, match.Label.ID.UUID, bctx.now) {
+			continue
+		}
 		possibleTeams := b.getPossibleTeams(candidate.BackfillCandidate, match.BackfillMatch, partySize)
 		if len(possibleTeams) == 0 {
 			continue
@@ -377,7 +381,18 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 	successfulUserIDs := make([]string, 0, len(entrantsToJoin))
 
 	for _, data := range entrantsToJoin {
-		if err := LobbyJoinEntrants(logger, b.matchRegistry, b.tracker, data.session, serverSession, result.Match.Label, data.entrant); err != nil {
+		if err := lobbyJoinEntrantsFromBackfill(logger, b.matchRegistry, b.tracker, data.session, serverSession, result.Match.Label, data.entrant); err != nil {
+			// Held, not placed: this entrant already holds a seat whose join is still in progress. Logged as
+			// its own line so a held placement is never read as a success or as a failure.
+			var held *joinHeldForMarkerError
+			if errors.As(err, &held) {
+				logger.Info("Backfill entrant still loading; LobbySessionSuccess not re-sent",
+					zap.String("mid", result.Match.Label.ID.UUID.String()),
+					zap.String("uid", data.entrant.GetUserId()),
+					zap.String("sid", data.entrant.GetSessionId()),
+					zap.Int64("marker_age_ms", held.markerAge.Milliseconds()))
+				continue
+			}
 			if isLobbyFullError(err) {
 				// Match is full; no point trying remaining entrants.
 				break

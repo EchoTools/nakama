@@ -318,6 +318,8 @@ func loop(mh *MatchHandler) {
 					zap.Int64("marker_age_ms", time.Since(marker.startedAt).Milliseconds()),
 					zap.Int64("deadline_ms", mh.JoinMarkerList.expiryDelayMs),
 					zap.Int32("reason", int32(marker.presence.Reason)))
+				// Backfill must not place this session straight back into this match (evr_lobby_expired_joins.go).
+				rememberExpiredJoin(mh.ID, marker.presence.SessionID, time.Now())
 				presences = append(presences, marker.presence)
 			}
 			// Doesn't matter if the call queue was full here. If the match is being closed then leaves don't matter anyway.

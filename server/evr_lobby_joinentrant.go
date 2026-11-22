@@ -10,6 +10,7 @@ import (
 
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -202,6 +203,18 @@ func (p *EvrPipeline) LobbyJoinEntrants(logger *zap.Logger, label *MatchLabel, p
 	return LobbyJoinEntrants(logger, p.nk.matchRegistry, p.nk.tracker, session, serverSession, label, presences...)
 }
 func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	return lobbyJoinEntrants(logger, matchRegistry, tracker, session, serverSession, label, false, entrants...)
+}
+
+// lobbyJoinEntrantsFromBackfill is LobbyJoinEntrants for a backfill placement. A backfill cycle re-offers
+// tickets whose entrants may already hold a seat in the match, so while such a seat's join marker is pending
+// the placement's sends are held. No other caller is held: a party follow that is answered with the kept
+// success must still be answered.
+func lobbyJoinEntrantsFromBackfill(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, entrants ...*EvrMatchPresence) error {
+	return lobbyJoinEntrants(logger, matchRegistry, tracker, session, serverSession, label, true, entrants...)
+}
+
+func lobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker Tracker, session Session, serverSession Session, label *MatchLabel, fromBackfill bool, entrants ...*EvrMatchPresence) error {
 	if session == nil || serverSession == nil {
 		return ErrSessionNotFound
 	}
@@ -236,6 +249,17 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	var found, allowed, isNew bool
 	var reason string
 	var labelStr string
+
+	// Only a backfill placement holds, so only it reads the marker. It holds before the attempt, not after:
+	// an attempt the match grants hands out a new entrant id and restarts the marker deadline, and with no
+	// success sent for that id the game client would connect on the first success's entrant id, which the
+	// match no longer holds. Holding here leaves the first join, and the success the client is acting on,
+	// exactly as they were.
+	if fromBackfill {
+		if age, pending := pendingJoinMarkerAge(matchRegistry, label.ID.UUID, e.SessionID); pending {
+			return &joinHeldForMarkerError{markerAge: age}
+		}
+	}
 
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
@@ -478,6 +502,28 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	logger.Info("Joined entrant.", zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()), zap.Int("role", e.RoleAlignment))
 	return nil
+}
+
+// pendingJoinMarkerAge reports how long ago the join attempt for sessionID was accepted by match mid, if
+// the match still holds that join's marker: the game client has not yet connected to the game server.
+// A registry that cannot say reports nothing pending.
+func pendingJoinMarkerAge(matchRegistry MatchRegistry, mid uuid.UUID, sessionID uuid.UUID) (time.Duration, bool) {
+	ager, ok := matchRegistry.(joinMarkerAger)
+	if !ok {
+		return 0, false
+	}
+	return ager.JoinMarkerAge(mid, sessionID)
+}
+
+// joinHeldForMarkerError is returned for a backfill placement that was not attempted because the entrant's
+// join marker in the match is still pending: the game client is still loading on the success it already
+// holds, and nothing was sent. It is not a failure and not a placement; the caller reports it as neither.
+type joinHeldForMarkerError struct {
+	markerAge time.Duration // how far into the join deadline the game client is
+}
+
+func (e *joinHeldForMarkerError) Error() string {
+	return fmt.Sprintf("join marker pending for %s; placement held", e.markerAge)
 }
 
 // lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.

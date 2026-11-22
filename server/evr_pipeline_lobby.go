@@ -12,7 +12,9 @@ import (
 )
 
 // joinMarkerAger is implemented by match registries that can say how long ago a
-// session's join attempt was accepted (LocalMatchRegistry). Logging only.
+// session's join attempt was accepted and is still pending (LocalMatchRegistry). Read by
+// lobbyJoinEntrantsFromBackfill to hold a second success while the join is pending, and by
+// the entrant ack for logging.
 type joinMarkerAger interface {
 	JoinMarkerAge(id uuid.UUID, sessionID uuid.UUID) (time.Duration, bool)
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
@@ -217,6 +218,101 @@ func TestIsCreateModeExcluded(t *testing.T) {
 			actual := isCreateModeExcluded(tt.mode, tt.excludedModes)
 			if actual != tt.expected {
 				t.Fatalf("expected %v, got %v", tt.expected, actual)
+			}
+		})
+	}
+}
+
+// TestMatchTeamAlignments pins the TeamAlignments a /create match is seeded with. A solo
+// creator who asks for "any" on a public match gets no entry, so the join-time balance picks
+// their team. A creator with a party keeps the Blue pin for the whole party: the join balance
+// places each entrant on its own, so an unpinned party would be split across teams.
+func TestMatchTeamAlignments(t *testing.T) {
+	const creator = "creator"
+	const friend = "friend"
+
+	tests := []struct {
+		name            string
+		mode            evr.Symbol
+		role            TeamIndex
+		partyUserIDs    []string
+		wantAlignments  map[string]int
+		wantMemberAlign int
+	}{
+		{
+			name:            "solo public combat any: no creator entry",
+			mode:            evr.ModeCombatPublic,
+			role:            AnyTeam,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "solo public arena any: no creator entry",
+			mode:            evr.ModeArenaPublic,
+			role:            AnyTeam,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "party of two public combat any: both Blue",
+			mode:            evr.ModeCombatPublic,
+			role:            AnyTeam,
+			partyUserIDs:    []string{creator, friend},
+			wantAlignments:  map[string]int{creator: evr.TeamBlue, friend: evr.TeamBlue},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "solo private combat any: Blue",
+			mode:            evr.ModeCombatPrivate,
+			role:            AnyTeam,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{creator: evr.TeamBlue},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "solo private arena any: Blue",
+			mode:            evr.ModeArenaPrivate,
+			role:            AnyTeam,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{creator: evr.TeamBlue},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "solo public combat blue: Blue",
+			mode:            evr.ModeCombatPublic,
+			role:            BlueTeam,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{creator: evr.TeamBlue},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "solo public arena spectator: Spectator",
+			mode:            evr.ModeArenaPublic,
+			role:            Spectator,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{creator: evr.TeamSpectator},
+			wantMemberAlign: evr.TeamBlue,
+		},
+		{
+			name:            "solo public social any: unassigned entry",
+			mode:            evr.ModeSocialPublic,
+			role:            AnyTeam,
+			partyUserIDs:    []string{creator},
+			wantAlignments:  map[string]int{creator: evr.TeamUnassigned},
+			wantMemberAlign: evr.TeamUnassigned,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAlignments, gotMemberAlign := matchTeamAlignments(tt.mode, tt.role, creator, tt.partyUserIDs)
+			if !maps.Equal(gotAlignments, tt.wantAlignments) {
+				t.Fatalf("TeamAlignments: want %v, got %v", tt.wantAlignments, gotAlignments)
+			}
+			if gotMemberAlign != tt.wantMemberAlign {
+				t.Fatalf("memberAlignment: want %d, got %d", tt.wantMemberAlign, gotMemberAlign)
 			}
 		})
 	}

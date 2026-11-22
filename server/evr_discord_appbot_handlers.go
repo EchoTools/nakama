@@ -703,6 +703,66 @@ func (d *DiscordAppBot) handleAllocateMatch(ctx context.Context, logger runtime.
 	return label, rtt, nil
 }
 
+// matchTeamAlignments returns the TeamAlignments a /create match is seeded with, and the
+// alignment its party followers are reserved on (memberAlignment, for
+// getOnlinePartyReservations).
+//
+// For social modes, use TeamUnassigned. For competitive modes, use the requested role
+// (spectator keeps the creator off a team) or default to TeamBlue when no role was specified.
+// The requested role belongs to the CREATOR, not to their party. `role:spectator` means "put
+// me in the stands"; it does not mean the three friends who came with them also came to
+// watch. The comment this replaces said as much -- "spectator keeps the creator off a team" --
+// while the loop below stamped it on everyone.
+//
+// It only became reachable once /create started resolving party members at all, so there was
+// never a symptom to notice.
+//
+// One case is left unseeded: a solo creator who asks for "any" on a public arena or combat
+// match gets no creator entry, so the join-time balance picks their team. That is what "any"
+// means on a public match. The Blue pin overrode the Orange seat that backfill had given a solo
+// creator, and split a public combat match 4 vs 2. A creator with a party keeps the Blue
+// pin for the whole party: the join balance places each entrant on its own, so an unpinned
+// party would be split across teams.
+func matchTeamAlignments(mode evr.Symbol, role TeamIndex, userID string, partyUserIDs []string) (map[string]int, int) {
+	creatorAlignment := evr.TeamUnassigned
+	memberAlignment := evr.TeamUnassigned
+	seedCreator := true
+
+	soloCreator := true
+	for _, memberUserID := range partyUserIDs {
+		if memberUserID != userID {
+			soloCreator = false
+			break
+		}
+	}
+	isPublic := mode == evr.ModeArenaPublic || mode == evr.ModeCombatPublic
+
+	if mode == evr.ModeArenaPrivate || mode == evr.ModeArenaPublic ||
+		mode == evr.ModeCombatPrivate || mode == evr.ModeCombatPublic {
+		memberAlignment = evr.TeamBlue
+		switch {
+		case role == Spectator:
+			creatorAlignment = evr.TeamSpectator
+		case role == AnyTeam && isPublic && soloCreator:
+			seedCreator = false
+		default:
+			creatorAlignment = evr.TeamBlue
+		}
+	}
+
+	teamAlignments := make(map[string]int, len(partyUserIDs))
+	for _, memberUserID := range partyUserIDs {
+		if memberUserID == userID {
+			if seedCreator {
+				teamAlignments[memberUserID] = creatorAlignment
+			}
+			continue
+		}
+		teamAlignments[memberUserID] = memberAlignment
+	}
+	return teamAlignments, memberAlignment
+}
+
 func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Logger, userID, guildID, region string, mode, level evr.Symbol, startTime time.Time, partyUserIDs []string, role TeamIndex) (l *MatchLabel, latencyMillis int, err error) {
 
 	// Find a parking match to prepare
@@ -823,37 +883,8 @@ func (d *DiscordAppBot) handleCreateMatch(ctx context.Context, logger runtime.Lo
 		return nil, 0, fmt.Errorf("no servers within %dms of your location. Your best server has %dms latency", MaxRegionPingMs, minLatencyMs)
 	}
 
-	// Create team alignments for party members to ensure they join the same team.
-	// For social modes, use TeamUnassigned. For competitive modes, use the
-	// requested role (spectator keeps the creator off a team) or default to
-	// TeamBlue when no role was specified.
-	// The requested role belongs to the CREATOR, not to their party. `role:spectator`
-	// means "put me in the stands"; it does not mean the three friends who came with
-	// them also came to watch. The comment this replaces said as much -- "spectator
-	// keeps the creator off a team" -- while the loop below stamped it on everyone.
-	//
-	// It only became reachable once /create started resolving party members at all,
-	// so there was never a symptom to notice.
-	creatorAlignment := evr.TeamUnassigned
-	memberAlignment := evr.TeamUnassigned
-	if mode == evr.ModeArenaPrivate || mode == evr.ModeArenaPublic ||
-		mode == evr.ModeCombatPrivate || mode == evr.ModeCombatPublic {
-		memberAlignment = evr.TeamBlue
-		if role == Spectator {
-			creatorAlignment = evr.TeamSpectator
-		} else {
-			creatorAlignment = evr.TeamBlue
-		}
-	}
-
-	teamAlignments := make(map[string]int, len(partyUserIDs))
-	for _, memberUserID := range partyUserIDs {
-		if memberUserID == userID {
-			teamAlignments[memberUserID] = creatorAlignment
-			continue
-		}
-		teamAlignments[memberUserID] = memberAlignment
-	}
+	// Seed team alignments for the creator and party members. See matchTeamAlignments.
+	teamAlignments, memberAlignment := matchTeamAlignments(mode, role, userID, partyUserIDs)
 
 	// Hold slots for online party members against backfill (RESV-1). The creator
 	// joins directly via the normal join race, so only followers need a reservation
