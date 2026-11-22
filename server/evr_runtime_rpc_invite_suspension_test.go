@@ -1,12 +1,17 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
+	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
+	"go.uber.org/atomic"
 )
 
 // suspend writes an active journal suspension for user in their guild.
@@ -130,26 +135,174 @@ func TestInviteRegions_SuspensionThatAllowsPrivateLobbiesIsListed(t *testing.T) 
 	}
 }
 
-func TestInviteSuspensionSet_Refuses(t *testing.T) {
-	full := GuildEnforcementRecord{}
-	limited := GuildEnforcementRecord{AllowPrivateLobbies: true}
+// A record reaches the set already expanded to the modes it covers, so the set is
+// asked about real records, not hand-built ones. A full record covers every
+// invite mode; one that allows private lobbies covers none of them.
+func TestInviteSuspensionsFrom_RecordCoverageOfInviteModes(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		set  inviteSuspensionSet
-		mode evr.Symbol
-		want bool
+		name         string
+		allowPrivate bool
+		want         bool
+	}{{"full record", false, true}, {"allows private lobbies", true, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := uuid.Must(uuid.NewV4()).String()
+			j := NewGuildEnforcementJournal(userA)
+			j.AddRecord(group, "enforcer", "e", "notice", "", false, tc.allowPrivate, time.Hour)
+			set, err := inviteSuspensionsFrom(userA, group, GuildEnforcementJournalList{userA: j}, nil, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range inviteModes {
+				if got := set.refuses(m); got != tc.want {
+					t.Errorf("refuses(%v) = %v, want %v", m, got, tc.want)
+				}
+			}
+			if got := set.refusesEvery(); got != tc.want {
+				t.Errorf("refusesEvery = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestInviteSuspensionSet_RefusesOnlyTheModesItHolds(t *testing.T) {
+	set := inviteSuspensionSet{evr.ModeCombatPrivate: {}}
+	if !set.refuses(evr.ModeCombatPrivate) || set.refuses(evr.ModeArenaPrivate) || set.refusesEvery() {
+		t.Errorf("set %v: want combat refused, arena not, not every mode", set)
+	}
+	if (inviteSuspensionSet{}).refuses(evr.ModeArenaPrivate) {
+		t.Error("an empty set refused")
+	}
+}
+
+// The player's own 1h suspension is hidden in the merge by an alt's 24h record in
+// the same guild. With alt suspensions ignored, the refusal must come from the
+// player's own record: ignoring alts is not ignoring the player.
+func TestInviteCreate_OwnSuspensionHiddenByLongerAltIsStillDenied(t *testing.T) {
+	w := newInviteWorld(t)
+	w.altsCount = false
+	w.groups[userA] = uuid.Must(uuid.NewV4())
+	w.suspend(userA, false, time.Hour)
+	alt := NewGuildEnforcementJournal(userB)
+	alt.AddRecord(w.groups[userA].String(), "enforcer", "e", "alt", "", false, false, 24*time.Hour)
+	w.journals[userB] = alt
+	_, err := w.call(withInviteRecord("create", InviteCreateRPC), userA, map[string]any{"experience": "arena"})
+	wantDenied(t, err, "own suspension under a longer alt suspension, alts ignored")
+	if len(w.allocs) != 0 {
+		t.Errorf("allocations = %d, want none", len(w.allocs))
+	}
+}
+
+// failingReadNakama fails storage reads of one collection.
+type failingReadNakama struct {
+	*occTestNakamaModule
+	collection string
+}
+
+func (n *failingReadNakama) StorageRead(ctx context.Context, reads []*runtime.StorageRead) ([]*api.StorageObject, error) {
+	for _, r := range reads {
+		if r.Collection == n.collection {
+			return nil, errors.New("storage down")
+		}
+	}
+	return n.occTestNakamaModule.StorageRead(ctx, reads)
+}
+
+func TestDefaultInviteSuspensions_Wiring(t *testing.T) {
+	const strongItem, weakItem = "hmd-serial-1", "unknown"
+	group := uuid.Must(uuid.NewV4())
+
+	for _, tc := range []struct {
+		name         string
+		noHistory    bool
+		altItems     []string // login evidence linking userA to the alt userB; nil: no alt
+		altSuspended bool
+		ownSuspended bool
+		ignoreAlts   bool   // the player's own IgnoreSuspensionsOfAltAccounts
+		guild        string // "" no registered guild, "rejects", "tolerates"
+		detector     bool
+		want         bool // denied for arena_private
 	}{
-		{"none", inviteSuspensionSet{}, evr.ModeArenaPrivate, false},
-		{"exact private", inviteSuspensionSet{evr.ModeArenaPrivate: full}, evr.ModeArenaPrivate, true},
-		{"public counterpart only", inviteSuspensionSet{evr.ModeArenaPublic: full}, evr.ModeArenaPrivate, true},
-		{"public counterpart, private allowed", inviteSuspensionSet{evr.ModeArenaPublic: limited}, evr.ModeArenaPrivate, false},
-		{"combat counterpart", inviteSuspensionSet{evr.ModeCombatPublic: full}, evr.ModeCombatPrivate, true},
-		{"social counterpart", inviteSuspensionSet{evr.ModeSocialPublic: full}, evr.ModeSocialPrivate, true},
-		{"other experience", inviteSuspensionSet{evr.ModeCombatPublic: full}, evr.ModeArenaPrivate, false},
+		{name: "strong alt suspended, guild rejects alts", altItems: []string{strongItem}, altSuspended: true, guild: "rejects", detector: true, want: true},
+		{name: "strong alt suspended, guild tolerates alts", altItems: []string{strongItem}, altSuspended: true, guild: "tolerates", detector: true, want: false},
+		{name: "strong alt suspended, player ignores alts", altItems: []string{strongItem}, altSuspended: true, guild: "rejects", detector: true, ignoreAlts: true, want: false},
+		{name: "weak-only alt dropped by the detector", altItems: []string{weakItem}, altSuspended: true, guild: "rejects", detector: true, want: false},
+		{name: "weak-only alt kept with no detector", altItems: []string{weakItem}, altSuspended: true, guild: "rejects", detector: false, want: true},
+		{name: "guild not registered counts alts", altItems: []string{strongItem}, altSuspended: true, guild: "", detector: true, want: true},
+		{name: "no login history, own suspension", noHistory: true, ownSuspended: true, guild: "rejects", detector: true, want: true},
+		{name: "no login history, no suspension", noHistory: true, guild: "rejects", detector: true, want: false},
+		{name: "own suspension, alts tolerated", altItems: []string{strongItem}, ownSuspended: true, guild: "tolerates", detector: true, want: true},
+		{name: "alt not suspended", altItems: []string{strongItem}, guild: "rejects", detector: true, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.set.refuses(tc.mode); got != tc.want {
-				t.Errorf("refuses = %v, want %v", got, tc.want)
+			prevBot, prevDet := globalAppBot.Load(), GetCGNATDetector()
+			t.Cleanup(func() { globalAppBot.Store(prevBot); SetCGNATDetector(prevDet) })
+			if tc.detector {
+				SetCGNATDetector(NewCGNATDetector(nil))
+			} else {
+				SetCGNATDetector(nil)
+			}
+			groups := map[string]*GuildGroup{}
+			switch tc.guild {
+			case "rejects", "tolerates":
+				groups[group.String()] = &GuildGroup{GroupMetadata: GroupMetadata{RejectPlayersWithSuspendedAlternates: tc.guild == "rejects"}}
+			}
+			globalAppBot.Store(&DiscordAppBot{guildGroupRegistry: &GuildGroupRegistry{
+				guildGroups:    atomic.NewPointer(&groups),
+				inheritanceMap: atomic.NewPointer(&map[string][]string{}),
+			}})
+
+			nk := newOCCTestNakamaModule()
+			seed := func(user, collection, key string, v any) {
+				b, err := json.Marshal(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				nk.seedObject(user, collection, key, string(b))
+			}
+			if !tc.noHistory {
+				h := NewLoginHistory(userA)
+				h.IgnoreSuspensionsOfAltAccounts = tc.ignoreAlts
+				if tc.altItems != nil {
+					h.AlternateMatches = map[string][]*AlternateSearchMatch{userB: {{OtherUserID: userB, Items: tc.altItems}}}
+				}
+				seed(userA, LoginStorageCollection, LoginHistoryStorageKey, h)
+			}
+			journal := func(user string) {
+				j := NewGuildEnforcementJournal(user)
+				j.AddRecord(group.String(), "enforcer", "e", "notice", "", false, false, time.Hour)
+				seed(user, StorageCollectionEnforcementJournal, StorageKeyEnforcementJournal, j)
+			}
+			if tc.altSuspended {
+				journal(userB)
+			}
+			if tc.ownSuspended {
+				journal(userA)
+			}
+
+			set, err := defaultInviteSuspensions(t.Context(), nk, userA, group)
+			if err != nil {
+				t.Fatalf("defaultInviteSuspensions: %v", err)
+			}
+			if got := set.refuses(evr.ModeArenaPrivate); got != tc.want {
+				t.Errorf("refuses(arena_private) = %v, want %v (set %v)", got, tc.want, set)
+			}
+		})
+	}
+}
+
+func TestDefaultInviteSuspensions_StorageFailuresRefuse(t *testing.T) {
+	prev := globalAppBot.Load()
+	t.Cleanup(func() { globalAppBot.Store(prev) })
+	groups := map[string]*GuildGroup{}
+	globalAppBot.Store(&DiscordAppBot{guildGroupRegistry: &GuildGroupRegistry{
+		guildGroups:    atomic.NewPointer(&groups),
+		inheritanceMap: atomic.NewPointer(&map[string][]string{}),
+	}})
+	for _, collection := range []string{LoginStorageCollection, StorageCollectionEnforcementJournal} {
+		t.Run(collection, func(t *testing.T) {
+			nk := &failingReadNakama{occTestNakamaModule: newOCCTestNakamaModule(), collection: collection}
+			if _, err := defaultInviteSuspensions(t.Context(), nk, userA, uuid.Must(uuid.NewV4())); err == nil {
+				t.Fatal("a storage failure was read as no suspension")
 			}
 		})
 	}

@@ -31,31 +31,21 @@ var inviteSuspensions = defaultInviteSuspensions
 // inviteSuspensionSet maps each mode to the suspension that applies to it.
 type inviteSuspensionSet map[evr.Symbol]GuildEnforcementRecord
 
-// invitePublicCounterpart is the public mode of a private invite mode.
-var invitePublicCounterpart = map[evr.Symbol]evr.Symbol{
-	evr.ModeArenaPrivate:  evr.ModeArenaPublic,
-	evr.ModeCombatPrivate: evr.ModeCombatPublic,
-	evr.ModeSocialPrivate: evr.ModeSocialPublic,
-}
-
 // inviteModes are the modes an invite game can be: every one is private.
 var inviteModes = []evr.Symbol{evr.ModeArenaPrivate, evr.ModeCombatPrivate, evr.ModeSocialPrivate}
 
 // refuses reports whether the caller may not create a game in mode.
 //
-// A record that covers the mode refuses it. A private mode is also refused when
-// the record covers its public counterpart, unless the record allows private
-// lobbies: that flag is what lets a suspended player into private games.
+// Only a record that covers the mode itself refuses it. There is no separate
+// "its public counterpart is suspended" rule: CheckEnforcementSuspensions has
+// already expanded every record to EnforcementRecordAffectedModes, which is every
+// mode, *_private included, unless the record allows private lobbies, in which
+// case it is the public modes only. So a record that refuses echo_arena also
+// refuses echo_arena_private, and one that allows private lobbies never puts a
+// private mode in the set. The flag needs no second check here.
 func (s inviteSuspensionSet) refuses(mode evr.Symbol) bool {
-	if _, ok := s[mode]; ok {
-		return true
-	}
-	if pub, ok := invitePublicCounterpart[mode]; ok {
-		if r, ok := s[pub]; ok && !r.SuspensionExcludesPrivateLobbies() {
-			return true
-		}
-	}
-	return false
+	_, ok := s[mode]
+	return ok
 }
 
 // refusesEvery reports whether every invite game is refused, which is what a
