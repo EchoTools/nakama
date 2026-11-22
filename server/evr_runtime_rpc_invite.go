@@ -521,6 +521,9 @@ func InviteCreateRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk 
 	} else if !member {
 		return "", inviteRefusal("denied")
 	}
+	if err := inviteCheckSuspension(ctx, nk, "create", userID, groupID, mode); err != nil {
+		return "", err
+	}
 
 	// Before the allocation: handleCreateMatch spends the creator's rate token
 	// before it reads the history, so a no-history account would be told "rate"
