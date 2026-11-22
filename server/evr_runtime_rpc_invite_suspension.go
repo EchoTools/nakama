@@ -63,8 +63,11 @@ func (s inviteSuspensionSet) refusesEvery() bool {
 // record per (guild, mode) covers the player and the alts, and when alt
 // suspensions do not count the player's own record is used instead, since the
 // merge keeps whichever expires last and an alt's can hide the player's.
-func inviteSuspensionsFrom(userID, groupID string, journals GuildEnforcementJournalList, inheritance map[string][]string, altsCount bool) (inviteSuspensionSet, error) {
-	merged, err := CheckEnforcementSuspensions(journals, inheritance)
+//
+// inheritance and filters are the guild registry's, the same the seat passes
+// (enforceJoinSuspension): an invite is refused exactly when a join would be.
+func inviteSuspensionsFrom(userID, groupID string, journals GuildEnforcementJournalList, inheritance map[string][]string, filters InheritanceFilters, altsCount bool) (inviteSuspensionSet, error) {
+	merged, err := CheckEnforcementSuspensions(journals, inheritance, filters)
 	if err != nil {
 		return nil, fmt.Errorf("check suspensions: %w", err)
 	}
@@ -76,7 +79,7 @@ func inviteSuspensionsFrom(userID, groupID string, journals GuildEnforcementJour
 		}
 		if r.UserID != userID && !altsCount {
 			if own == nil {
-				if own, err = CheckOwnEnforcementSuspensions(userID, journals, inheritance); err != nil {
+				if own, err = CheckOwnEnforcementSuspensions(userID, journals, inheritance, filters); err != nil {
 					return nil, fmt.Errorf("check own suspensions: %w", err)
 				}
 			}
@@ -113,7 +116,7 @@ func defaultInviteSuspensions(ctx context.Context, nk runtime.NakamaModule, user
 	}
 	gg := appBot.guildGroupRegistry.Get(groupID.String())
 	altsCount := !history.IgnoreSuspensionsOfAltAccounts && (gg == nil || gg.RejectPlayersWithSuspendedAlternates)
-	return inviteSuspensionsFrom(userID, groupID.String(), journals, appBot.guildGroupRegistry.InheritanceByParentGroupID(), altsCount)
+	return inviteSuspensionsFrom(userID, groupID.String(), journals, appBot.guildGroupRegistry.InheritanceByParentGroupID(), appBot.guildGroupRegistry.InheritanceFilters(), altsCount)
 }
 
 // inviteCheckSuspension answers "denied" when a journal suspension covers the
