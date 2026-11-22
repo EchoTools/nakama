@@ -208,7 +208,6 @@ func NewSessionWS(logger *zap.Logger, config Config, format SessionFormat, sessi
 		serverSession:        nil,
 		earlyQuitConfig:      atomic.NewPointer[EarlyQuitPlayerState](nil),
 		isGoldNameTag:        atomic.NewBool(false),
-		isAmbassadorMatch:    atomic.NewBool(false),
 		latencyHistory:       atomic.NewPointer(NewLatencyHistory()),
 		unreachableServers:   atomic.NewPointer(NewUnreachableServers()),
 		MatchLifecycle:       NewPlayerMatchLifecycle(logger),

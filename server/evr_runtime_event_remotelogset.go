@@ -940,7 +940,13 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 				}
 			}
 
-			if ratingsOn {
+			// A player who queued into this match in ambassador mode has their own
+			// rating left unwritten. Everyone else's ratings were calculated above
+			// with this player as an input, exactly as in any match.
+			if ratingsOn && playerInfo.Ambassador {
+				logAmbassadorStatsSuppressed(logger, playerInfo, matchID.String(), label.Mode, statsSiteRatings)
+			}
+			if ratingsOn && !playerInfo.Ambassador {
 
 				// Use the pre-calculated team ratings for this player
 				if rating, ok := teamRatings[playerInfo.SessionID]; ok {
@@ -1039,11 +1045,15 @@ func (s *EventRemoteLogSet) processPostMatchMessages(ctx context.Context, logger
 
 			// Update the player's statistics, if the service settings allow it
 			if !serviceSettings.DisableStatisticsUpdates {
-				statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
-				if err != nil {
-					return fmt.Errorf("failed to convert type stats to score map: %w", err)
+				if playerInfo.Ambassador {
+					logAmbassadorStatsSuppressed(logger, playerInfo, matchID.String(), label.Mode, statsSiteTypeStats)
+				} else {
+					statEntries, err := typeStatsToScoreMap(playerInfo.UserID, playerInfo.DisplayName, groupIDStr, label.Mode, typeStats)
+					if err != nil {
+						return fmt.Errorf("failed to convert type stats to score map: %w", err)
+					}
+					allStatEntries = append(allStatEntries, statEntries...)
 				}
-				allStatEntries = append(allStatEntries, statEntries...)
 			}
 		}
 

@@ -26,6 +26,12 @@ type PlayerInfo struct {
 	PingMillis    int        `json:"ping_ms,omitempty"` // The latency as measured from the ping check.
 	MatchmakingAt *time.Time `json:"matchmaking_at,omitempty"`
 
+	// Ambassador marks a player who queued into this match in ambassador mode.
+	// The match-end writers read it to leave that player's own rating and
+	// leaderboard stats unwritten. It is set from the player's presence when the
+	// label is rebuilt, and is never copied to the public label.
+	Ambassador bool `json:"ambassador,omitempty"`
+
 	// Reservation provenance. Set only when IsReservation is true.
 	//
 	// IsReservation alone cannot tell a party slot being held from a crashed
