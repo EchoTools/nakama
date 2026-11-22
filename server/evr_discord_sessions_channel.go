@@ -221,7 +221,8 @@ func (sm *SessionsChannelManager) PostSessionMessage(label *MatchLabel, guildGro
 }
 
 // createSessionEmbed creates the Discord embed and components for a session
-func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, _ *GuildGroup) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
+func (sm *SessionsChannelManager) createSessionEmbed(published *MatchLabel, _ *GuildGroup) ([]*discordgo.MessageEmbed, []discordgo.MessageComponent) {
+	label := filterLabelPlayers(published, false)
 	sessionUUID := strings.ToUpper(label.ID.UUID.String())
 
 	// Calculate duration (this will be updated in the loop)
@@ -313,7 +314,7 @@ func (sm *SessionsChannelManager) createSessionEmbed(label *MatchLabel, _ *Guild
 }
 
 // createMatchDetailsEmbed creates the match details embed with scores and players
-func (sm *SessionsChannelManager) createMatchDetailsEmbed(label *MatchLabel) *discordgo.MessageEmbed {
+func (sm *SessionsChannelManager) createMatchDetailsEmbed(label visibleLabel) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Fields: make([]*discordgo.MessageEmbedField, 0),
 	}
