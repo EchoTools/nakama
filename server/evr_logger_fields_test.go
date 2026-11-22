@@ -144,6 +144,26 @@ func TestLogHelpersReportTheCallSite(t *testing.T) {
 	}
 }
 
+// A plain runtime.Logger Warn/Error (no Log* helper) must report its own call
+// site in "source". This is the upstream path every pre-existing call uses; it
+// regressed once when the source lookup was re-plumbed through the helpers.
+func TestRuntimeLoggerWarnErrorReportTheCallSite(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	rl := NewRuntimeGoLogger(zap.New(core, zap.AddCaller()))
+
+	_, thisFile, line, _ := goruntime.Caller(0)
+	rl.Warn("warn-%s", "msg")   // line+1
+	rl.Error("error-%s", "msg") // line+2
+
+	for i, level := range []zapcore.Level{zapcore.WarnLevel, zapcore.ErrorLevel} {
+		entries := logs.FilterLevelExact(level).All()
+		require.Len(t, entries, 1, "%s entries", level)
+		want := fmt.Sprintf("%s:%d", thisFile, line+1+i)
+		require.Equal(t, want, entries[0].ContextMap()["source"], "%s source field", level)
+		require.Equal(t, want, fmt.Sprintf("%s:%d", entries[0].Caller.File, entries[0].Caller.Line), "%s zap caller", level)
+	}
+}
+
 // RuntimeGoLogger.WithFields drops a caller-supplied "runtime" key so nothing
 // can override or duplicate the base runtime=go field. The Log* helpers hand
 // fields straight to zap, so they must drop it too.
