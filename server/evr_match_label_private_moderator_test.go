@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
@@ -102,5 +103,51 @@ func TestFilterLabelPlayers_PrivateModeratorRemoved(t *testing.T) {
 				t.Errorf("a caller that sees moderators got %d players, want %d", len(shown.Players), len(label.Players))
 			}
 		})
+	}
+}
+
+// OpenSlotsByRole, which the join, backfill and find decisions read, answers for a
+// private arena or combat label as it did when the moderator row carried AnyTeam.
+func TestOpenSlotsByRole_PrivateModeratorMatchesMain(t *testing.T) {
+	roles := []int{int(AnyTeam), evr.TeamBlue, evr.TeamOrange, evr.TeamSpectator, evr.TeamModerator, evr.TeamUnassigned}
+	for name, mode := range map[string]evr.Symbol{"arena": evr.ModeArenaPrivate, "combat": evr.ModeCombatPrivate} {
+		for _, reserved := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reserved=%v", name, reserved), func(t *testing.T) {
+				label, moderator := newPrivateModeratorLabel(t, mode)
+				if reserved {
+					label.Players = append(label.Players, PlayerInfo{
+						UserID:        moderator.UserID.String(),
+						Team:          TeamIndex(evr.TeamModerator),
+						IsReservation: true,
+					})
+				}
+
+				main := *label
+				main.Players = make([]PlayerInfo, len(label.Players))
+				copy(main.Players, label.Players)
+				for i := range main.Players {
+					if int(main.Players[i].Team) == evr.TeamModerator {
+						main.Players[i].Team = AnyTeam
+					}
+				}
+
+				for _, role := range roles {
+					got, err := label.OpenSlotsByRole(role)
+					if err != nil {
+						t.Fatalf("OpenSlotsByRole(%d): %v", role, err)
+					}
+					want, _ := main.OpenSlotsByRole(role)
+					if got != want {
+						t.Errorf("OpenSlotsByRole(%d) = %d, want %d", role, got, want)
+					}
+					if g, w := label.RoleCount(role), main.RoleCount(role); g != w {
+						t.Errorf("RoleCount(%d) = %d, want %d", role, g, w)
+					}
+					if g, w := label.RoleReservationCount(role), main.RoleReservationCount(role); g != w {
+						t.Errorf("RoleReservationCount(%d) = %d, want %d", role, g, w)
+					}
+				}
+			})
+		}
 	}
 }

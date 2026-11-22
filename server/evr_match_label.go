@@ -540,11 +540,20 @@ func (s *MatchLabel) roleLimit(role int) int {
 	return 0
 }
 
+// rowRole is the role a row is counted under by RoleCount and RoleReservationCount.
+// A moderator row in a private arena or combat label is counted as AnyTeam.
+func (s *MatchLabel) rowRole(p PlayerInfo) TeamIndex {
+	if int(p.Team) == evr.TeamModerator && (s.Mode == evr.ModeArenaPrivate || s.Mode == evr.ModeCombatPrivate) {
+		return AnyTeam
+	}
+	return p.Team
+}
+
 // RoleCount returns the number of actual players (not reservations) in the given role.
 func (s *MatchLabel) RoleCount(role int) int {
 	count := 0
 	for _, p := range s.Players {
-		if p.Team == TeamIndex(role) && !p.IsReservation {
+		if s.rowRole(p) == TeamIndex(role) && !p.IsReservation {
 			count++
 		}
 	}
@@ -563,7 +572,7 @@ func (s *MatchLabel) RoleCount(role int) int {
 func (s *MatchLabel) RoleReservationCount(role int) int {
 	count := 0
 	for _, p := range s.Players {
-		if p.Team == TeamIndex(role) && p.IsReservation {
+		if s.rowRole(p) == TeamIndex(role) && p.IsReservation {
 			count++
 		}
 	}
