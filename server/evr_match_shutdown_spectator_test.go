@@ -79,8 +79,8 @@ func TestMatchShutdown_SpectatorPresentAtDrainDeadline(t *testing.T) {
 	if len(found) != 1 {
 		t.Fatalf("expected exactly one log record with a spectators field, got %d; all records: %v", len(found), logs.All())
 	}
-	if found[0].Level != zapcore.WarnLevel {
-		t.Fatalf("expected the role breakdown at warn, got %s", found[0].Level)
+	if found[0].Level != zapcore.InfoLevel {
+		t.Fatalf("expected the role breakdown at info, got %s", found[0].Level)
 	}
 	fields := found[0].ContextMap()
 	for k, v := range want {
@@ -88,6 +88,50 @@ func TestMatchShutdown_SpectatorPresentAtDrainDeadline(t *testing.T) {
 		if !ok || got != v {
 			t.Fatalf("field %q = %v (%T), want %d; record: %v", k, fields[k], fields[k], v, fields)
 		}
+	}
+}
+
+// TestMatchTerminate_PlannedShutdownWithSpectatorLogsInfo drives MatchTerminate
+// the way the runtime does for a planned node shutdown (match_handler.go
+// QueueTerminate): terminateTick is 0, because MatchShutdown never armed a
+// drain, and a spectator is still present. That is expected, so the role
+// breakdown is Info, never Warn. The forced-drain path already warns in
+// MatchLoop; this record must not repeat that warning.
+func TestMatchTerminate_PlannedShutdownWithSpectatorLogsInfo(t *testing.T) {
+	t.Parallel()
+
+	state, _ := drainTestState(1)
+	spectator := reconnectTestPlayer("spec", evr.TeamSpectator)
+	state.presenceMap[spectator.GetSessionId()] = spectator
+	state.rebuildCache()
+	if state.terminateTick != 0 {
+		t.Fatalf("precondition: terminateTick = %d, want 0 (no drain armed)", state.terminateTick)
+	}
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := NewRuntimeGoLogger(zap.New(core))
+	m := &EvrMatch{enqueueTermination: func(runtime.Logger, matchTerminationTask) {}}
+
+	// The returned state is not the subject here.
+	m.MatchTerminate(context.Background(), logger, nil, &drainTestNK{}, &drainTestDispatcher{}, 10, state, 10)
+
+	var found []observer.LoggedEntry
+	for _, e := range logs.All() {
+		if _, ok := e.ContextMap()["spectators"]; ok {
+			found = append(found, e)
+		}
+		if e.Level >= zapcore.WarnLevel {
+			t.Fatalf("planned shutdown logged at %s: %q", e.Level, e.Message)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected exactly one role-breakdown record, got %d; all records: %v", len(found), logs.All())
+	}
+	if found[0].Level != zapcore.InfoLevel {
+		t.Fatalf("role breakdown level = %s, want info", found[0].Level)
+	}
+	if got, _ := found[0].ContextMap()["spectators"].(int64); got != 1 {
+		t.Fatalf("spectators = %v, want 1; record: %v", found[0].ContextMap()["spectators"], found[0].ContextMap())
 	}
 }
 

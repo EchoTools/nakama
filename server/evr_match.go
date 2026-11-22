@@ -1812,13 +1812,16 @@ func (m *EvrMatch) MatchTerminate(ctx context.Context, logger runtime.Logger, db
 	// spectator left at the deadline (#763) looks the same as a stuck player
 	// there. The breakdown is logged here, not on that warning, because that
 	// warning sits inside the lifecycle block MatchLoop marks do-not-modify.
+	// It is Info: the runtime's planned node shutdown (QueueTerminate,
+	// terminateTick == 0) reaches here with sessions present as a matter of
+	// course, and the forced-drain path has already warned in MatchLoop.
 	if len(playerSessionIDs) > 0 {
 		logger.WithFields(map[string]any{
 			"remaining_sessions": len(playerSessionIDs),
 			"players":            len(playerSessionIDs) - spectators - moderators,
 			"spectators":         spectators,
 			"moderators":         moderators,
-		}).Warn("Terminating with sessions still present; disconnecting them.")
+		}).Info("Terminating with sessions still present; disconnecting them.")
 	}
 
 	// The game server's session is deliberately not handed to the task. It is
