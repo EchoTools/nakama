@@ -314,6 +314,7 @@ func NewEvrPipeline(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 	earlyQuitMessageTrigger.StartLockoutExpiryScheduler(context.Background())
 
 	evrPipeline.startMatchHistoryCleanup(ctx)
+	startInviteCodeCleanup(ctx, logger, nk)
 
 	return evrPipeline
 }
