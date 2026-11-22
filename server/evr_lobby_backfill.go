@@ -382,6 +382,17 @@ func (b *PostMatchmakerBackfill) executeBackfillResultOptimized(
 
 	for _, data := range entrantsToJoin {
 		if err := lobbyJoinEntrantsFromBackfill(logger, b.matchRegistry, b.tracker, data.session, serverSession, result.Match.Label, data.entrant); err != nil {
+			// Held, not placed: this entrant already holds a seat whose join is still in progress. Logged as
+			// its own line so a held placement is never read as a success or as a failure.
+			var held *joinHeldForMarkerError
+			if errors.As(err, &held) {
+				logger.Info("Backfill entrant still loading; LobbySessionSuccess not re-sent",
+					zap.String("mid", result.Match.Label.ID.UUID.String()),
+					zap.String("uid", data.entrant.GetUserId()),
+					zap.String("sid", data.entrant.GetSessionId()),
+					zap.Int64("marker_age_ms", held.markerAge.Milliseconds()))
+				continue
+			}
 			if isLobbyFullError(err) {
 				// Match is full; no point trying remaining entrants.
 				break

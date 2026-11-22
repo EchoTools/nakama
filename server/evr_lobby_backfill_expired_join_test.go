@@ -132,3 +132,32 @@ func TestBackfillOffersMatchToSessionThatDidNotExpireFromIt(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, expired, result.Match.Label.ID.UUID)
 }
+
+// Recording an expiry drops every window that has already ended, so the store holds only open windows
+// as of the latest expiry and cannot grow without bound.
+func TestRememberExpiredJoinPrunesEndedWindows(t *testing.T) {
+	expiredJoins.Lock()
+	saved := expiredJoins.until
+	expiredJoins.until = map[expiredJoinKey]time.Time{}
+	expiredJoins.Unlock()
+	t.Cleanup(func() {
+		expiredJoins.Lock()
+		expiredJoins.until = saved
+		expiredJoins.Unlock()
+	})
+
+	t0 := time.Now()
+	ended := expiredJoinKey{uuid.Must(uuid.NewV4()), uuid.Must(uuid.NewV4())}
+	open := expiredJoinKey{uuid.Must(uuid.NewV4()), uuid.Must(uuid.NewV4())}
+	rememberExpiredJoin(ended.match, ended.session, t0)
+	rememberExpiredJoin(open.match, open.session, t0.Add(expiredJoinBackoff/2))
+	latest := expiredJoinKey{uuid.Must(uuid.NewV4()), uuid.Must(uuid.NewV4())}
+	rememberExpiredJoin(latest.match, latest.session, t0.Add(expiredJoinBackoff))
+
+	expiredJoins.Lock()
+	defer expiredJoins.Unlock()
+	require.NotContains(t, expiredJoins.until, ended, "a window that ended is dropped when the next expiry is recorded")
+	require.Contains(t, expiredJoins.until, open, "a window still open is kept")
+	require.Contains(t, expiredJoins.until, latest)
+	require.Len(t, expiredJoins.until, 2)
+}

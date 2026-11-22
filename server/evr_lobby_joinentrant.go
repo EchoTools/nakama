@@ -250,24 +250,21 @@ func lobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	var reason string
 	var labelStr string
 
-	// Only a backfill placement holds, so only it reads the marker. It reads the marker before the attempt:
-	// a granted attempt adds one for this join, so a marker read after it cannot tell a second join from the first.
-	var priorAge time.Duration
-	var priorPending bool
+	// Only a backfill placement holds, so only it reads the marker. It holds before the attempt, not after:
+	// an attempt the match grants hands out a new entrant id and restarts the marker deadline, and with no
+	// success sent for that id the game client would connect on the first success's entrant id, which the
+	// match no longer holds. Holding here leaves the first join, and the success the client is acting on,
+	// exactly as they were.
 	if fromBackfill {
-		priorAge, priorPending = pendingJoinMarkerAge(matchRegistry, label.ID.UUID, e.SessionID)
+		if age, pending := pendingJoinMarkerAge(matchRegistry, label.ID.UUID, e.SessionID); pending {
+			return &joinHeldForMarkerError{markerAge: age}
+		}
 	}
 
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
 
 	if reason == ErrJoinRejectReasonDuplicateJoin.Error() {
-		if priorPending {
-			// The game client is still joining on the success it already holds. A second one would
-			// carry keys the game server never received, and would arrive while the client is joining.
-			logJoinHeldForMarker(logger, "duplicate join", label.ID.UUID, e, priorAge)
-			return nil
-		}
 		// The session already holds a seat here; its game client never acted on the message that
 		// grants it (evr_lobby_session_success_cache.go). Send that message again.
 		return resendLobbySessionSuccess(logger, session, label.ID.UUID, e)
@@ -438,13 +435,6 @@ func lobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
-	// A backfill grant while this entrant's marker was already pending is a second join for the seat. The
-	// success sent with the first join is the one whose keys the game server holds, so this one is not sent.
-	if priorPending {
-		logJoinHeldForMarker(logger, "granted join", label.ID.UUID, e, priorAge)
-		return nil
-	}
-
 	// Create the protobuf envelope for the lobby session success message.
 	successEnvelope := &rtapi.Envelope{
 		Message: &rtapi.Envelope_LobbySessionSuccessV5{
@@ -525,16 +515,15 @@ func pendingJoinMarkerAge(matchRegistry MatchRegistry, mid uuid.UUID, sessionID 
 	return ager.JoinMarkerAge(mid, sessionID)
 }
 
-// logJoinHeldForMarker logs a LobbySessionSuccess that is not sent because the entrant's join marker in the
-// match is still pending. path says which send was held; the marker's age says how far into the join
-// deadline the game client is.
-func logJoinHeldForMarker(logger *zap.Logger, path string, mid uuid.UUID, e *EvrMatchPresence, age time.Duration) {
-	logger.Info("Join marker pending; not sending a second LobbySessionSuccess",
-		zap.String("path", path),
-		zap.String("mid", mid.String()),
-		zap.String("uid", e.UserID.String()),
-		zap.String("sid", e.SessionID.String()),
-		zap.Int64("marker_age_ms", age.Milliseconds()))
+// joinHeldForMarkerError is returned for a backfill placement that was not attempted because the entrant's
+// join marker in the match is still pending: the game client is still loading on the success it already
+// holds, and nothing was sent. It is not a failure and not a placement; the caller reports it as neither.
+type joinHeldForMarkerError struct {
+	markerAge time.Duration // how far into the join deadline the game client is
+}
+
+func (e *joinHeldForMarkerError) Error() string {
+	return fmt.Sprintf("join marker pending for %s; placement held", e.markerAge)
 }
 
 // lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.

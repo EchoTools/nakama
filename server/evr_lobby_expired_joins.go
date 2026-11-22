@@ -32,6 +32,12 @@ var expiredJoins = struct {
 
 // rememberExpiredJoin records that session's join marker expired in match at now, and drops windows that
 // have already ended.
+//
+// Pruning happens here only, not on read. The store gains entries only here, and each write drops every
+// ended window, so it never holds more than the expiries of the five minutes before the latest one; ended
+// windows left over while no join expires are bounded by that and cannot grow. A read prune would cost a
+// full scan under the lock on the hot path, once per candidate per match per backfill cycle, to free
+// entries that are already bounded.
 func rememberExpiredJoin(match, session uuid.UUID, now time.Time) {
 	c := &expiredJoins
 	c.Lock()
