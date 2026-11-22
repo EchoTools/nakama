@@ -10,6 +10,7 @@ import (
 
 	rtapi "buf.build/gen/go/echotools/nevr-api/protocolbuffers/go/gameservice/v1"
 	"github.com/bwmarrin/discordgo"
+	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"go.uber.org/zap"
@@ -237,10 +238,20 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 	var reason string
 	var labelStr string
 
+	// Read the marker before the attempt. A granted attempt adds one for this join, so a marker read after
+	// it cannot tell a second join from the first.
+	priorAge, priorPending := pendingJoinMarkerAge(matchRegistry, label.ID.UUID, e.SessionID)
+
 	// Trigger MatchJoinAttempt
 	found, allowed, isNew, reason, labelStr, _ = matchRegistry.JoinAttempt(sessionCtx, label.ID.UUID, label.ID.Node, e.UserID, e.SessionID, e.Username, e.SessionExpiry, nil, e.ClientIP, e.ClientPort, label.ID.Node, metadata)
 
 	if reason == ErrJoinRejectReasonDuplicateJoin.Error() {
+		if priorPending {
+			// The game client is still joining on the success it already holds. A second one would
+			// carry keys the game server never received, and would arrive while the client is joining.
+			logJoinHeldForMarker(logger, "duplicate join", label.ID.UUID, e, priorAge)
+			return nil
+		}
 		// The session already holds a seat here; its game client never acted on the message that
 		// grants it (evr_lobby_session_success_cache.go). Send that message again.
 		return resendLobbySessionSuccess(logger, session, label.ID.UUID, e)
@@ -411,6 +422,13 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 		}
 	}
 
+	// A granted join while this entrant's marker was already pending is a second join for the seat. The
+	// success sent with the first join is the one whose keys the game server holds, so this one is not sent.
+	if priorPending {
+		logJoinHeldForMarker(logger, "granted join", label.ID.UUID, e, priorAge)
+		return nil
+	}
+
 	// Create the protobuf envelope for the lobby session success message.
 	successEnvelope := &rtapi.Envelope{
 		Message: &rtapi.Envelope_LobbySessionSuccessV5{
@@ -478,6 +496,29 @@ func LobbyJoinEntrants(logger *zap.Logger, matchRegistry MatchRegistry, tracker 
 
 	logger.Info("Joined entrant.", zap.String("mid", label.ID.UUID.String()), zap.String("uid", e.UserID.String()), zap.String("sid", e.SessionID.String()), zap.Int("role", e.RoleAlignment))
 	return nil
+}
+
+// pendingJoinMarkerAge reports how long ago the join attempt for sessionID was accepted by match mid, if
+// the match still holds that join's marker: the game client has not yet connected to the game server.
+// A registry that cannot say reports nothing pending.
+func pendingJoinMarkerAge(matchRegistry MatchRegistry, mid uuid.UUID, sessionID uuid.UUID) (time.Duration, bool) {
+	ager, ok := matchRegistry.(joinMarkerAger)
+	if !ok {
+		return 0, false
+	}
+	return ager.JoinMarkerAge(mid, sessionID)
+}
+
+// logJoinHeldForMarker logs a LobbySessionSuccess that is not sent because the entrant's join marker in the
+// match is still pending. path says which send was held; the marker's age says how far into the join
+// deadline the game client is.
+func logJoinHeldForMarker(logger *zap.Logger, path string, mid uuid.UUID, e *EvrMatchPresence, age time.Duration) {
+	logger.Info("Join marker pending; not sending a second LobbySessionSuccess",
+		zap.String("path", path),
+		zap.String("mid", mid.String()),
+		zap.String("uid", e.UserID.String()),
+		zap.String("sid", e.SessionID.String()),
+		zap.Int64("marker_age_ms", age.Milliseconds()))
 }
 
 // lobbyAuthorize checks if the user is allowed to join the lobby based on various criteria such as guild membership, suspensions, and account age.
