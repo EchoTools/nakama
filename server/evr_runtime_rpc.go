@@ -131,15 +131,18 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 			return "", fmt.Errorf("failed to unmarshal match label: %w", err)
 		}
 
+		// The response is cached and shared, so no caller's moderators-view applies.
+		visible := filterLabelPlayers(l, false)
+
 		// Count from original label so private lobby players are included
-		for _, p := range l.Players {
+		for _, p := range visible.Players {
 			if !playerSet[p.UserID] {
 				playerSet[p.UserID] = true
 				playerCount++
 			}
 		}
 
-		v := l.PublicView()
+		v := visible.PublicView()
 		gameServers = append(gameServers, v.GameServer)
 		if v.LobbyType != UnassignedLobby {
 			labels = append(labels, v)
@@ -280,11 +283,18 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 		}
 	}
 
+	callerID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+	viewer := newRPCModeratorViewer(ctx, logger, db, nk, callerID)
+
 	labels := make([]json.RawMessage, 0, len(matches))
 	var data json.RawMessage
 	for _, match := range matches {
 		if fullAccess {
-			labels = append(labels, json.RawMessage(match.GetLabel().GetValue()))
+			raw, err := labelJSONForViewer(match.GetLabel().GetValue(), viewer)
+			if err != nil {
+				return "", err
+			}
+			labels = append(labels, json.RawMessage(raw))
 			continue
 		} else {
 			label := &MatchLabel{}
@@ -310,7 +320,7 @@ func MatchRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime
 					}
 				}
 			}
-			data, err = json.Marshal(label.PublicView())
+			data, err = json.Marshal(filterLabelPlayers(label, viewer.showsModeratorsOf(label)).PublicView())
 			if err != nil {
 				return "", fmt.Errorf("failed to marshal match label: %w", err)
 			}

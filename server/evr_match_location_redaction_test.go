@@ -247,7 +247,7 @@ func TestFilterMatchForUser_NoPlayerLocationWithoutPrivateDataAccess(t *testing.
 	userID := label.GameServer.OperatorID.String() // the server host: sees the full label
 	groupID := label.GroupID.String()
 
-	got := filterMatchForUser(nk.match(t), userID, false, false, nil, map[string]bool{}, map[string]bool{groupID: true})
+	got := filterMatchForUser(nk.match(t), userID, false, false, nil, map[string]bool{}, map[string]bool{groupID: true}, nil)
 	if got == nil {
 		t.Fatal("server host got no match")
 	}
@@ -266,7 +266,7 @@ func TestFilterMatchForUser_PrivilegedKeepsPlayerLocation(t *testing.T) {
 		label := newLocationTestLabel(t)
 		nk := &locationLabelNK{label: label}
 		userID := label.GameServer.OperatorID.String()
-		got := filterMatchForUser(nk.match(t), userID, args[0], args[1], nil, map[string]bool{}, map[string]bool{label.GroupID.String(): true})
+		got := filterMatchForUser(nk.match(t), userID, args[0], args[1], nil, map[string]bool{}, map[string]bool{label.GroupID.String(): true}, nil)
 		if got == nil {
 			t.Fatalf("%s: got no match", name)
 		}
@@ -282,7 +282,7 @@ func TestFilterMatchForUser_PrivilegedKeepsPlayerLocation(t *testing.T) {
 func TestPublicViews_NoPlayerLocation(t *testing.T) {
 	label := newLocationTestLabel(t)
 
-	member, err := json.Marshal(createPublicMatchLabel(label))
+	member, err := json.Marshal(createPublicMatchLabel(filterLabelPlayers(label, false)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestFilterMatchForUser_ParticipantSeesOwnMatchPlayers(t *testing.T) {
 	label.LobbyType = PrivateLobby // not public: only the participant rule can show it
 	nk := &locationLabelNK{label: label}
 
-	got := filterMatchForUser(nk.match(t), playerID, false, false, nil, map[string]bool{}, map[string]bool{})
+	got := filterMatchForUser(nk.match(t), playerID, false, false, nil, map[string]bool{}, map[string]bool{}, nil)
 	if got == nil {
 		t.Fatal("participant got no match")
 	}
@@ -467,7 +467,7 @@ func TestFilterMatchForUser_ParticipantAuditorKeepsAuditorView(t *testing.T) {
 	gg.State = &GuildGroupState{RoleCache: map[string]map[string]bool{"auditor-role": {playerID: true}}}
 	nk := &locationLabelNK{label: label}
 
-	got := filterMatchForUser(nk.match(t), playerID, false, false, map[string]*GuildGroup{gid: gg}, map[string]bool{}, map[string]bool{gid: true})
+	got := filterMatchForUser(nk.match(t), playerID, false, false, map[string]*GuildGroup{gid: gg}, map[string]bool{}, map[string]bool{gid: true}, nil)
 	if got == nil {
 		t.Fatal("auditor got no match")
 	}
@@ -485,8 +485,8 @@ func TestFilterMatchForUser_ReservationHolderSameAsNonParticipant(t *testing.T) 
 	label, _ := ownMatchLabel(t)
 	nk := &locationLabelNK{label: label}
 	member := map[string]bool{label.GroupID.String(): true}
-	holder := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, member)
-	other := filterMatchForUser(nk.match(t), uuid.Must(uuid.NewV4()).String(), false, false, nil, map[string]bool{}, member)
+	holder := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, member, nil)
+	other := filterMatchForUser(nk.match(t), uuid.Must(uuid.NewV4()).String(), false, false, nil, map[string]bool{}, member, nil)
 	if holder == nil || other == nil {
 		t.Fatal("public match hidden from a member")
 	}
@@ -499,7 +499,7 @@ func TestFilterMatchForUser_ReservationHolderSameAsNonParticipant(t *testing.T) 
 	// And in a private match the holder sees nothing at all.
 	label.LobbyType = PrivateLobby
 	nk = &locationLabelNK{label: label}
-	if got := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, map[string]bool{}); got != nil {
+	if got := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, map[string]bool{}, nil); got != nil {
 		t.Errorf("reservation holder saw a private match: %s", got.GetLabel().GetValue())
 	}
 }
@@ -510,7 +510,7 @@ func TestFilterMatchForUser_NonParticipantSeesNoPlayers(t *testing.T) {
 	nk := &locationLabelNK{label: label}
 	other := uuid.Must(uuid.NewV4()).String()
 
-	got := filterMatchForUser(nk.match(t), other, false, false, nil, map[string]bool{}, map[string]bool{label.GroupID.String(): true})
+	got := filterMatchForUser(nk.match(t), other, false, false, nil, map[string]bool{}, map[string]bool{label.GroupID.String(): true}, nil)
 	if got == nil {
 		t.Fatal("member got no public match")
 	}
@@ -525,7 +525,7 @@ func TestFilterMatchForUser_SuspendedParticipantSeesNothing(t *testing.T) {
 	nk := &locationLabelNK{label: label}
 	gid := label.GroupID.String()
 
-	got := filterMatchForUser(nk.match(t), playerID, false, false, nil, map[string]bool{gid: true}, map[string]bool{gid: true})
+	got := filterMatchForUser(nk.match(t), playerID, false, false, nil, map[string]bool{gid: true}, map[string]bool{gid: true}, nil)
 	if got != nil {
 		t.Errorf("suspended participant saw their match: %s", got.GetLabel().GetValue())
 	}

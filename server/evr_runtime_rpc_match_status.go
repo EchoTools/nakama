@@ -94,10 +94,11 @@ func MatchStatusRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk r
 				}
 			}
 
+			visible := filterLabelPlayers(&matchLabel, newRPCModeratorViewer(ctx, logger, db, nk, userID).showsModeratorsOf(&matchLabel))
 			if hasFullAccess {
-				response.MatchLabel = &matchLabel
+				response.MatchLabel = visible.MatchLabel
 			}
-			response.PublicLabel = matchLabel.PublicView()
+			response.PublicLabel = visible.PublicView()
 		}
 	}
 
