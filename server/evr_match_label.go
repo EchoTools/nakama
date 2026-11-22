@@ -255,11 +255,33 @@ func (s *MatchLabel) IsLocked() bool {
 	return false
 }
 
+// privateRowTeam is the team a private arena or combat label row carries: the
+// moderator role for a moderator, AnyTeam for everyone else.
+func privateRowTeam(roleAlignment int) TeamIndex {
+	if roleAlignment == evr.TeamModerator {
+		return TeamIndex(evr.TeamModerator)
+	}
+	return AnyTeam
+}
+
+// isNonPlayerRow reports whether the row is a spectator, or a moderator in a mode
+// that counts moderators apart from players. A moderator row in a private arena or
+// combat label is counted as a player.
+func (s *MatchLabel) isNonPlayerRow(p PlayerInfo) bool {
+	switch int(p.Team) {
+	case evr.TeamSpectator:
+		return true
+	case evr.TeamModerator:
+		return s.Mode != evr.ModeArenaPrivate && s.Mode != evr.ModeCombatPrivate
+	}
+	return false
+}
+
 // GetPlayerCount returns the number of actual players (not spectators, moderators, or reservations).
 func (s *MatchLabel) GetPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {
-		if !p.IsReservation && int(p.Team) != evr.TeamSpectator && int(p.Team) != evr.TeamModerator {
+		if !p.IsReservation && !s.isNonPlayerRow(p) {
 			count++
 		}
 	}
@@ -270,7 +292,7 @@ func (s *MatchLabel) GetPlayerCount() int {
 func (s *MatchLabel) GetNonPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {
-		if !p.IsReservation && (int(p.Team) == evr.TeamSpectator || int(p.Team) == evr.TeamModerator) {
+		if !p.IsReservation && s.isNonPlayerRow(p) {
 			count++
 		}
 	}
@@ -314,7 +336,7 @@ func (s *MatchLabel) GetPlayerByUserID(userID string) *PlayerInfo {
 func (s *MatchLabel) ReservedPlayerCount() int {
 	count := 0
 	for _, p := range s.Players {
-		if p.IsReservation && int(p.Team) != evr.TeamSpectator && int(p.Team) != evr.TeamModerator {
+		if p.IsReservation && !s.isNonPlayerRow(p) {
 			count++
 		}
 	}
@@ -518,11 +540,20 @@ func (s *MatchLabel) roleLimit(role int) int {
 	return 0
 }
 
+// rowRole is the role a row is counted under by RoleCount and RoleReservationCount.
+// A moderator row in a private arena or combat label is counted as AnyTeam.
+func (s *MatchLabel) rowRole(p PlayerInfo) TeamIndex {
+	if int(p.Team) == evr.TeamModerator && (s.Mode == evr.ModeArenaPrivate || s.Mode == evr.ModeCombatPrivate) {
+		return AnyTeam
+	}
+	return p.Team
+}
+
 // RoleCount returns the number of actual players (not reservations) in the given role.
 func (s *MatchLabel) RoleCount(role int) int {
 	count := 0
 	for _, p := range s.Players {
-		if p.Team == TeamIndex(role) && !p.IsReservation {
+		if s.rowRole(p) == TeamIndex(role) && !p.IsReservation {
 			count++
 		}
 	}
@@ -541,7 +572,7 @@ func (s *MatchLabel) RoleCount(role int) int {
 func (s *MatchLabel) RoleReservationCount(role int) int {
 	count := 0
 	for _, p := range s.Players {
-		if p.Team == TeamIndex(role) && p.IsReservation {
+		if s.rowRole(p) == TeamIndex(role) && p.IsReservation {
 			count++
 		}
 	}
@@ -772,7 +803,7 @@ func (s *MatchLabel) rebuildCache() {
 					Username:      p.Username,
 					DisplayName:   p.DisplayName,
 					EvrID:         p.EvrID,
-					Team:          AnyTeam, // Roles are not tracked in private matches.
+					Team:          privateRowTeam(p.RoleAlignment),
 					ClientIP:      p.ClientIP,
 					DiscordID:     p.DiscordID,
 					PartyID:       p.PartyID.String(),

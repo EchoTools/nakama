@@ -242,7 +242,8 @@ func (d *DiscordAppBot) updateServerEmbeds(ctx context.Context, logger runtime.L
 	embedInfo.LastUpdate = now
 }
 
-func (d *DiscordAppBot) createServerEmbed(label *MatchLabel) *discordgo.MessageEmbed {
+func (d *DiscordAppBot) createServerEmbed(published *MatchLabel) *discordgo.MessageEmbed {
+	label := filterLabelPlayers(published, false)
 	embed := &discordgo.MessageEmbed{
 		Title: fmt.Sprintf("Match: %s", label.Mode.String()),
 		Fields: []*discordgo.MessageEmbedField{

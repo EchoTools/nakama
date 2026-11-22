@@ -441,10 +441,16 @@ func AfterListMatchesHook(ctx context.Context, logger runtime.Logger, db *sql.DB
 		}
 	}
 
+	viewer := newModeratorViewer(userID, isGlobalOperator,
+		func(groupID string) *GuildGroup { return guildGroups[groupID] },
+		func(gg *GuildGroup) bool {
+			return canManageGuild(ctx, logger, nk, guildPermissionSourceOrNil(), gg, userID)
+		})
+
 	// Filter each match based on permissions
 	filteredMatches := make([]*api.Match, 0, len(out.Matches))
 	for _, match := range out.Matches {
-		filteredMatch := filterMatchForUser(match, userID, isGlobalOperator, hasPrivateDataAccess, guildGroups, suspendedGroupIDs, memberGroupIDs)
+		filteredMatch := filterMatchForUser(match, userID, isGlobalOperator, hasPrivateDataAccess, guildGroups, suspendedGroupIDs, memberGroupIDs, viewer)
 		if filteredMatch != nil {
 			filteredMatches = append(filteredMatches, filteredMatch)
 		}
@@ -473,14 +479,15 @@ func filterMatchesForAnonymous(out *api.MatchList) error {
 		}
 
 		// Create a sanitized public label
-		publicLabel := label.PublicView()
+		visible := filterLabelPlayers(label, false)
+		publicLabel := visible.PublicView()
 		labelJSON, _ := json.Marshal(publicLabel)
 
 		filteredMatches = append(filteredMatches, &api.Match{
 			MatchId:       match.MatchId,
 			Authoritative: match.Authoritative,
 			Label:         &wrapperspb.StringValue{Value: string(labelJSON)},
-			Size:          match.Size,
+			Size:          sizeAfterFilter(match.Size, label, visible),
 			TickRate:      match.TickRate,
 			HandlerName:   match.HandlerName,
 		})
@@ -489,7 +496,7 @@ func filterMatchesForAnonymous(out *api.MatchList) error {
 	return nil
 }
 
-func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPrivateDataAccess bool, guildGroups map[string]*GuildGroup, suspendedGroupIDs, memberGroupIDs map[string]bool) *api.Match {
+func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPrivateDataAccess bool, guildGroups map[string]*GuildGroup, suspendedGroupIDs, memberGroupIDs map[string]bool, viewer *moderatorViewer) *api.Match {
 	// Parse the label
 	if match.Label == nil {
 		return nil
@@ -515,6 +522,9 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 	if isSuspended && !isServerHost {
 		return nil
 	}
+
+	// Every label built below is built from the label as filtered here.
+	visible := filterLabelPlayers(label, viewer.showsModeratorsOf(label))
 
 	// Check if user is a member of this guild
 	isMember := memberGroupIDs[matchGroupID]
@@ -543,15 +553,15 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 	var labelJSON []byte
 	var err error
 	if canSeeFullData {
-		filteredLabel := createFullMatchLabel(label, canSeeClientIPs)
+		filteredLabel := createFullMatchLabel(visible, canSeeClientIPs)
 		if !canSeePlayerLocation {
 			filteredLabel = filteredLabel.RedactPlayerLocation()
 		}
 		labelJSON, err = json.Marshal(filteredLabel)
 	} else if isParticipant {
-		labelJSON, err = json.Marshal(createParticipantMatchLabel(label))
+		labelJSON, err = json.Marshal(createParticipantMatchLabel(visible))
 	} else if isMember || label.IsPublic() {
-		publicLabel := createPublicMatchLabel(label)
+		publicLabel := createPublicMatchLabel(visible)
 		labelJSON, err = json.Marshal(publicLabel)
 	} else {
 		// User can't see this match at all
@@ -566,7 +576,7 @@ func filterMatchForUser(match *api.Match, userID string, isGlobalOperator, hasPr
 		MatchId:       match.MatchId,
 		Authoritative: match.Authoritative,
 		Label:         &wrapperspb.StringValue{Value: string(labelJSON)},
-		Size:          match.Size,
+		Size:          sizeAfterFilter(match.Size, label, visible),
 		TickRate:      match.TickRate,
 		HandlerName:   match.HandlerName,
 	}
@@ -608,7 +618,7 @@ type PublicMatchLabel struct {
 	ServerCountry string `json:"server_country,omitempty"`
 }
 
-func createPublicMatchLabel(label *MatchLabel) *PublicMatchLabel {
+func createPublicMatchLabel(label visibleLabel) *PublicMatchLabel {
 	public := &PublicMatchLabel{
 		ID:          label.ID,
 		Open:        label.Open,
@@ -659,7 +669,7 @@ type ParticipantMatchLabel struct {
 	Players []ParticipantPlayer `json:"players"`
 }
 
-func createParticipantMatchLabel(label *MatchLabel) *ParticipantMatchLabel {
+func createParticipantMatchLabel(label visibleLabel) *ParticipantMatchLabel {
 	players := make([]ParticipantPlayer, 0, len(label.Players))
 	for _, p := range label.Players {
 		if p.IsReservation {
@@ -675,7 +685,8 @@ func createParticipantMatchLabel(label *MatchLabel) *ParticipantMatchLabel {
 	return &ParticipantMatchLabel{PublicMatchLabel: createPublicMatchLabel(label), Players: players}
 }
 
-func createFullMatchLabel(label *MatchLabel, includeClientIPs bool) *MatchLabel {
+func createFullMatchLabel(visible visibleLabel, includeClientIPs bool) *MatchLabel {
+	label := visible.MatchLabel
 	// Return the full label, but potentially redact IPs if not authorized
 	if !includeClientIPs && label.GameServer != nil {
 		// Create a copy with redacted endpoint

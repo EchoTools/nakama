@@ -22,6 +22,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/echotools/vrmlgo/v5"
 	"github.com/gofrs/uuid/v5"
+	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/heroiclabs/nakama/v3/server/evr"
 	"github.com/samber/lo"
@@ -203,13 +204,7 @@ func NewDiscordAppBot(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 					logger.WithField("err", err).Warn("Error fetching matches.")
 					continue
 				}
-				playerCount := 0
-				matchCount := 0
-				for _, match := range matches {
-					playerCount += int(match.Size) - 1
-					matchCount++
-
-				}
+				playerCount, matchCount := botStatusCounts(logger, matches)
 				statusMessage := fmt.Sprintf("%d players in %d matches", playerCount, matchCount)
 				if err := dg.UpdateGameStatus(0, "with "+statusMessage); err != nil {
 					logger.WithField("err", err).Warn("Failed to update status")
@@ -1815,7 +1810,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 
 				// If there are players in the match, show confirmation with match status
 				if len(label.Players) > 0 {
-					embed := d.createShutdownMatchEmbed(label)
+					embed := d.createShutdownMatchEmbed(labelForViewer(ctx, logger, d.db, nk, userID, label))
 
 					// Encode shutdown parameters in the button custom ID
 					disconnectStr := "0"
@@ -4229,76 +4224,9 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		return err
 	}
 
-	regionHash := evr.ToSymbol(regionStr).String()
-
-	tracked := make([]*MatchLabel, 0, len(matches))
-
-	for _, match := range matches {
-
-		state := &MatchLabel{}
-		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
-			LogError(logger, "Failed to unmarshal match label", zap.Error(err))
-			continue
-		}
-
-		if state.GameServer == nil {
-			continue
-		}
-		for _, r := range state.GameServer.RegionCodes {
-			if regionStr == r || regionHash == r {
-				tracked = append(tracked, state)
-				continue
-			}
-		}
-	}
-
-	if len(tracked) == 0 {
-		return fmt.Errorf("no matches found in region %s", regionStr)
-	}
-
-	// Create a message embed that contains a table of the server, the creation time, the number of players, and the spark link
-	embed := &discordgo.MessageEmbed{
-		Title:       fmt.Sprintf("Region %s", regionStr),
-		Description: fmt.Sprintf("updated <t:%d:f>", time.Now().UTC().Unix()),
-		Fields:      make([]*discordgo.MessageEmbedField, 0),
-	}
-	var status string
-
-	for _, state := range tracked {
-
-		if state.LobbyType == UnassignedLobby {
-			status = "Unassigned"
-		} else if state.Size == 0 {
-			if !state.Started() {
-				spawnedBy := "unknown"
-				if state.SpawnedBy != "" {
-					spawnedBy, err = GetDiscordIDByUserID(ctx, d.db, state.SpawnedBy)
-					if err != nil {
-						LogError(logger, "Failed to get discord ID", zap.Error(err))
-					}
-				}
-				status = fmt.Sprintf("Reserved by <@%s> <t:%d:R>", spawnedBy, state.StartTime.UTC().Unix())
-			} else {
-				status = "Empty"
-			}
-		} else {
-			players := make([]string, 0, state.Size)
-			for _, player := range state.Players {
-				players = append(players, fmt.Sprintf("`%s` (`%s`)", player.DisplayName, player.Username))
-			}
-			status = fmt.Sprintf("%s: %s", state.Mode.String(), strings.Join(players, ", "))
-
-		}
-
-		serverIDStr := "unknown"
-		if state.GameServer != nil {
-			serverIDStr = strconv.FormatUint(state.GameServer.ServerID, 10)
-		}
-		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
-			Name:   serverIDStr,
-			Value:  status,
-			Inline: false,
-		})
+	embed, err := d.regionStatusEmbed(ctx, logger, regionStr, matches)
+	if err != nil {
+		return err
 	}
 
 	if existingMessage != nil {
@@ -4359,6 +4287,105 @@ func (d *DiscordAppBot) createRegionStatusEmbed(ctx context.Context, logger runt
 		}()
 	}
 	return nil
+}
+
+// botStatusCounts is the player and match counts the bot status shows. A match's
+// players are its presences less the game server and less the moderators the list
+// label builder leaves out; a match whose label cannot be read counts its presences
+// less the game server.
+func botStatusCounts(logger runtime.Logger, matches []*api.Match) (players, matchCount int) {
+	for _, match := range matches {
+		label, err := MatchLabelFromString(match.GetLabel().GetValue())
+		if err != nil {
+			logger.WithField("err", err).Debug("Failed to parse match label for the bot status.")
+			players += int(match.Size) - 1
+			matchCount++
+			continue
+		}
+		size := sizeAfterFilter(match.Size, label, filterLabelPlayers(label, false))
+		players += int(size) - 1
+		matchCount++
+	}
+	return players, matchCount
+}
+
+// regionStatusEmbed builds the region status embed from the listed matches. A match's
+// players are listed from the label the list label builder returns.
+func (d *DiscordAppBot) regionStatusEmbed(ctx context.Context, logger runtime.Logger, regionStr string, matches []*api.Match) (*discordgo.MessageEmbed, error) {
+	var err error
+	regionHash := evr.ToSymbol(regionStr).String()
+
+	tracked := make([]visibleLabel, 0, len(matches))
+
+	for _, match := range matches {
+
+		state := &MatchLabel{}
+		if err := json.Unmarshal([]byte(match.GetLabel().GetValue()), state); err != nil {
+			LogError(logger, "Failed to unmarshal match label", zap.Error(err))
+			continue
+		}
+
+		if state.GameServer == nil {
+			continue
+		}
+		for _, r := range state.GameServer.RegionCodes {
+			if regionStr == r || regionHash == r {
+				tracked = append(tracked, filterLabelPlayers(state, false))
+				continue
+			}
+		}
+	}
+
+	if len(tracked) == 0 {
+		return nil, fmt.Errorf("no matches found in region %s", regionStr)
+	}
+
+	// Create a message embed that contains a table of the server, the creation time, the number of players, and the spark link
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("Region %s", regionStr),
+		Description: fmt.Sprintf("updated <t:%d:f>", time.Now().UTC().Unix()),
+		Fields:      make([]*discordgo.MessageEmbedField, 0),
+	}
+	var status string
+
+	for _, state := range tracked {
+
+		if state.LobbyType == UnassignedLobby {
+			status = "Unassigned"
+		} else if state.Size == 0 {
+			if !state.Started() {
+				spawnedBy := "unknown"
+				if state.SpawnedBy != "" {
+					spawnedBy, err = GetDiscordIDByUserID(ctx, d.db, state.SpawnedBy)
+					if err != nil {
+						LogError(logger, "Failed to get discord ID", zap.Error(err))
+					}
+				}
+				status = fmt.Sprintf("Reserved by <@%s> <t:%d:R>", spawnedBy, state.StartTime.UTC().Unix())
+			} else {
+				status = "Empty"
+			}
+		} else {
+			players := make([]string, 0, state.Size)
+			for _, player := range state.Players {
+				players = append(players, fmt.Sprintf("`%s` (`%s`)", player.DisplayName, player.Username))
+			}
+			status = fmt.Sprintf("%s: %s", state.Mode.String(), strings.Join(players, ", "))
+
+		}
+
+		serverIDStr := "unknown"
+		if state.GameServer != nil {
+			serverIDStr = strconv.FormatUint(state.GameServer.ServerID, 10)
+		}
+		embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+			Name:   serverIDStr,
+			Value:  status,
+			Inline: false,
+		})
+	}
+
+	return embed, nil
 }
 
 // EscapeDiscordMarkdown escapes all Discord markdown special characters in s
