@@ -56,6 +56,15 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 				AllowedGroups: []string{GroupGlobalOperators},
 			},
 		},
+		// account/revoke_device_sessions - Global operators only
+		{
+			ID:      "account/revoke_device_sessions",
+			Handler: AccountRevokeDeviceSessionsRpc,
+			Permission: &RPCPermission{
+				RequireAuth:   true,
+				AllowedGroups: []string{GroupGlobalOperators},
+			},
+		},
 		// cgnat/cleanup - Break false-positive alt links from CGNAT IPs
 		{
 			ID:      "cgnat/cleanup",
@@ -98,6 +107,8 @@ func buildEVRRPCRegistrations(rpcHandler *RPCHandler, sbmm *SkillBasedMatchmaker
 		{ID: "device/auth/verify", Handler: DeviceAuthVerifyRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 		{ID: "device/auth/refresh", Handler: DeviceAuthRefreshRpc, Permission: &RPCPermission{RequireAuth: false, AllowedGroups: []string{}}},
 		{ID: "device/auth/issue", Handler: DeviceAuthIssueRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
+		// device/sessions/revoke_all - self-service: log the caller out of every device
+		{ID: "device/sessions/revoke_all", Handler: DeviceSessionsRevokeAllRpc, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
 
 		// Party management (storage-backed)
 		{ID: "party/create", Handler: PartyCreateRPC, Permission: &RPCPermission{RequireAuth: true, AllowedGroups: []string{}}},
