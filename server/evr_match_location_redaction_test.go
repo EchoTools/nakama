@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/heroiclabs/nakama-common/api"
@@ -391,17 +392,61 @@ func ownMatchPlayers(t *testing.T, m *api.Match) []map[string]any {
 func ownMatchLabel(t *testing.T) (*MatchLabel, string) {
 	t.Helper()
 	label := newLocationTestLabel(t)
+	label.Players[0].DiscordID = "111222333444555666"
+	label.Players[0].PartyID = uuid.Must(uuid.NewV4()).String()
+	label.Players[0].MatchmakingAt = &time.Time{}
 	label.Players = append(label.Players, PlayerInfo{
 		UserID:        uuid.Must(uuid.NewV4()).String(),
+		SessionID:     uuid.Must(uuid.NewV4()).String(),
 		Username:      "held-seat",
 		IsReservation: true,
+		ReservationID: "held-reservation-id",
 	})
 	return label, label.Players[0].UserID
 }
 
-// A player whose own user id is in Players sees that match's players, without
-// client IPs, geohashes or the server endpoint, though they are neither host,
-// auditor, operator nor even a member of the guild.
+// assertParticipantView fails if doc leaks anything beyond the public label and
+// the participant's players list.
+func assertParticipantView(t *testing.T, name, doc string, label *MatchLabel, playerID string) {
+	t.Helper()
+	assertNoPlayerLocation(t, name, doc)
+	for _, banned := range []string{
+		testLocServerIP, "10.0.0.9", "endpoint_id", "\"endpoint\"", "session_id", "party_id", "evr_id",
+		"matchmaking_at", "held-seat", "held-reservation-id", "reservation", "latitude", "longitude",
+		"geohash", "asn", label.Players[0].SessionID, label.Players[0].PartyID, label.Players[1].SessionID,
+		label.Players[1].UserID,
+	} {
+		if strings.Contains(doc, banned) {
+			t.Errorf("%s: participant view contains %q: %s", name, banned, doc)
+		}
+	}
+	var found bool
+	for _, p := range ownMatchPlayersFromDoc(t, doc) {
+		if p["user_id"] == playerID && p["discord_id"] == "111222333444555666" && p["display_name"] == "PlayerOne" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("%s: participant's own entry (user_id, discord_id, display_name) missing: %s", name, doc)
+	}
+	if n := len(ownMatchPlayersFromDoc(t, doc)); n != 1 {
+		t.Errorf("%s: %d players listed, want 1 (reservation excluded): %s", name, n, doc)
+	}
+}
+
+func ownMatchPlayersFromDoc(t *testing.T, doc string) []map[string]any {
+	t.Helper()
+	var d struct {
+		Players []map[string]any `json:"players"`
+	}
+	if err := json.Unmarshal([]byte(doc), &d); err != nil {
+		t.Fatalf("label is not JSON: %v", err)
+	}
+	return d.Players
+}
+
+// A participant gets the public label plus a minimal players list, though
+// they are neither host, auditor, operator nor a guild member.
 func TestFilterMatchForUser_ParticipantSeesOwnMatchPlayers(t *testing.T) {
 	label, playerID := ownMatchLabel(t)
 	label.LobbyType = PrivateLobby // not public: only the participant rule can show it
@@ -411,25 +456,49 @@ func TestFilterMatchForUser_ParticipantSeesOwnMatchPlayers(t *testing.T) {
 	if got == nil {
 		t.Fatal("participant got no match")
 	}
-	doc := got.GetLabel().GetValue()
-	players := ownMatchPlayers(t, got)
-	if len(players) == 0 || players[0]["user_id"] != playerID {
-		t.Fatalf("participant does not see their own player entry: %s", doc)
+	assertParticipantView(t, "filterMatchForUser participant", got.GetLabel().GetValue(), label, playerID)
+}
+
+// A participant who is also an auditor gets the auditor view, unchanged.
+func TestFilterMatchForUser_ParticipantAuditorKeepsAuditorView(t *testing.T) {
+	label, playerID := ownMatchLabel(t)
+	gid := label.GroupID.String()
+	gg := &GuildGroup{GroupMetadata: GroupMetadata{RoleMap: GuildGroupRoles{Auditor: "auditor-role"}}}
+	gg.State = &GuildGroupState{RoleCache: map[string]map[string]bool{"auditor-role": {playerID: true}}}
+	nk := &locationLabelNK{label: label}
+
+	got := filterMatchForUser(nk.match(t), playerID, false, false, map[string]*GuildGroup{gid: gg}, map[string]bool{}, map[string]bool{gid: true})
+	if got == nil {
+		t.Fatal("auditor got no match")
 	}
-	assertNoPlayerLocation(t, "filterMatchForUser participant", doc)
-	// createFullMatchLabel(label, false) clears the endpoint object; endpoint_id
-	// still carries the server's addresses for hosts and auditors today (not changed here).
-	if !strings.Contains(doc, `"endpoint":""`) {
-		t.Errorf("participant sees the server endpoint object: %s", doc)
+	doc := got.GetLabel().GetValue()
+	for _, want := range []string{"endpoint_id", "session_id", "held-seat", label.Players[0].SessionID} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("auditor view lost %q: %s", want, doc)
+		}
 	}
 }
 
-// A reservation is a held seat, not a participant.
-func TestFilterMatchForUser_ReservationIsNotAParticipant(t *testing.T) {
+// A reservation is a held seat, not a participant: in a PUBLIC match the
+// holder gets exactly what a non-participant gets.
+func TestFilterMatchForUser_ReservationHolderSameAsNonParticipant(t *testing.T) {
 	label, _ := ownMatchLabel(t)
-	label.LobbyType = PrivateLobby
 	nk := &locationLabelNK{label: label}
-
+	member := map[string]bool{label.GroupID.String(): true}
+	holder := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, member)
+	other := filterMatchForUser(nk.match(t), uuid.Must(uuid.NewV4()).String(), false, false, nil, map[string]bool{}, member)
+	if holder == nil || other == nil {
+		t.Fatal("public match hidden from a member")
+	}
+	if holder.GetLabel().GetValue() != other.GetLabel().GetValue() {
+		t.Errorf("reservation holder differs from non-participant:\n%s\n%s", holder.GetLabel().GetValue(), other.GetLabel().GetValue())
+	}
+	if players := ownMatchPlayers(t, holder); len(players) != 0 {
+		t.Errorf("reservation holder sees players: %s", holder.GetLabel().GetValue())
+	}
+	// And in a private match the holder sees nothing at all.
+	label.LobbyType = PrivateLobby
+	nk = &locationLabelNK{label: label}
 	if got := filterMatchForUser(nk.match(t), label.Players[1].UserID, false, false, nil, map[string]bool{}, map[string]bool{}); got != nil {
 		t.Errorf("reservation holder saw a private match: %s", got.GetLabel().GetValue())
 	}
@@ -493,11 +562,7 @@ func TestAfterListMatchesHook_ParticipantSeesOwnMatchPlayers(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("participant sees %d matches, want 1", len(matches))
 	}
-	players := ownMatchPlayers(t, matches[0])
-	if len(players) == 0 || players[0]["user_id"] != playerID {
-		t.Fatalf("participant does not see their own player entry: %s", matches[0].GetLabel().GetValue())
-	}
-	assertNoPlayerLocation(t, "AfterListMatchesHook participant", matches[0].GetLabel().GetValue())
+	assertParticipantView(t, "AfterListMatchesHook participant", matches[0].GetLabel().GetValue(), label, playerID)
 }
 
 func TestAfterListMatchesHook_NonParticipantSeesNoPlayers(t *testing.T) {
