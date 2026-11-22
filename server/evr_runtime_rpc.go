@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"net/url"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,22 +63,75 @@ func (t *TimeRFC3339) UnmarshalText(data []byte) error {
 	return nil
 }
 
+// matchPublicResponse is a match/public response and the guilds whose moderators it
+// leaves out.
+type matchPublicResponse struct {
+	payload         string
+	moderatorGroups []string
+}
+
+// seesModeratorsOf reports whether the viewer may see the moderators of any of the guilds.
+func (v *moderatorViewer) seesModeratorsOf(groupIDs []string) bool {
+	for _, groupID := range groupIDs {
+		if v.canSee(groupID) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	// The public view is cached.
-	cachedResponse, _, found := h.responseCache.Get("match:public")
-	if found {
-		return cachedResponse.(string), nil
+	callerID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
+
+	// The cached response is the one with no moderators. A caller who may see the
+	// moderators of a guild it leaves out is answered from a fresh listing.
+	if cachedResponse, _, found := h.responseCache.Get("match:public"); found {
+		cached := cachedResponse.(*matchPublicResponse)
+		if len(cached.moderatorGroups) == 0 {
+			return cached.payload, nil
+		}
+		viewer := newRPCModeratorViewer(ctx, logger, db, nk, callerID)
+		if !viewer.seesModeratorsOf(cached.moderatorGroups) {
+			return cached.payload, nil
+		}
+		full, err := h.listMatchesPublic(ctx, logger, nk, viewer)
+		if err != nil {
+			return "", err
+		}
+		return full.payload, nil
 	}
 
+	filtered, err := h.listMatchesPublic(ctx, logger, nk, nil)
+	if err != nil {
+		return "", err
+	}
+	h.responseCache.Set("match:public", filtered, 3*time.Second)
+
+	if len(filtered.moderatorGroups) > 0 {
+		viewer := newRPCModeratorViewer(ctx, logger, db, nk, callerID)
+		if viewer.seesModeratorsOf(filtered.moderatorGroups) {
+			full, err := h.listMatchesPublic(ctx, logger, nk, viewer)
+			if err != nil {
+				return "", err
+			}
+			return full.payload, nil
+		}
+	}
+	return filtered.payload, nil
+}
+
+// listMatchesPublic builds the match/public response, listing a match's moderators
+// only where viewer may see them.
+func (h *RPCHandler) listMatchesPublic(ctx context.Context, logger runtime.Logger, nk runtime.NakamaModule, viewer *moderatorViewer) (*matchPublicResponse, error) {
 	minSize := 1
 	query := "*"
 	matches, err := nk.MatchList(ctx, 100, true, "", &minSize, nil, query)
 	if err != nil {
-		return "", runtime.NewError("Failed to list matches", StatusInternalError)
+		return nil, runtime.NewError("Failed to list matches", StatusInternalError)
 	}
 	data, err := json.Marshal(matches)
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal matches", StatusInternalError)
+		return nil, runtime.NewError("Failed to marshal matches", StatusInternalError)
 	}
 	_ = data
 
@@ -88,7 +143,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 	for {
 		page, next, err := nk.GroupsList(ctx, "", GuildGroupLangTag, nil, nil, 100, cursor)
 		if err != nil {
-			return "", runtime.NewError("Failed to list guild groups", StatusInternalError)
+			return nil, runtime.NewError("Failed to list guild groups", StatusInternalError)
 		}
 		groups = append(groups, page...)
 
@@ -102,7 +157,7 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 		groupID := group.GetId()
 		presences, err := nk.StreamUserList(StreamModeMatchmaking, groupID, "", "", false, true)
 		if err != nil {
-			return "", runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
+			return nil, runtime.NewError("Failed to list matchmaker tickets", StatusInternalError)
 		}
 		matchmakingTicketsByGroupID[groupID] = make(map[string]int)
 		for _, presence := range presences {
@@ -125,14 +180,18 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 	gameServers := make([]*GameServerPresence, 0, len(matches))
 	labels := make([]*MatchLabel, 0, len(matches))
 	playerSet := make(map[string]bool)
+	moderatorGroups := make(map[string]bool)
 	for _, m := range matches {
 		l := &MatchLabel{}
 		if err := json.Unmarshal([]byte(m.GetLabel().GetValue()), l); err != nil {
-			return "", fmt.Errorf("failed to unmarshal match label: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal match label: %w", err)
 		}
 
-		// The response is cached and shared, so no caller's moderators-view applies.
-		visible := filterLabelPlayers(l, false)
+		showModerators := viewer.showsModeratorsOf(l)
+		visible := filterLabelPlayers(l, showModerators)
+		if !showModerators {
+			moderatorGroups[matchGroupIDString(l)] = true
+		}
 
 		// Count from original label so private lobby players are included
 		for _, p := range visible.Players {
@@ -181,16 +240,10 @@ func (h *RPCHandler) MatchListPublicRPC(ctx context.Context, logger runtime.Logg
 
 	data, err = json.MarshalIndent(response, "", "  ")
 	if err != nil {
-		return "", runtime.NewError("Failed to marshal response", StatusInternalError)
+		return nil, runtime.NewError("Failed to marshal response", StatusInternalError)
 	}
 
-	payload = string(data)
-
-	// Update the cache
-	h.responseCache.Set("match:public", payload, 3*time.Second)
-
-	return payload, nil
-
+	return &matchPublicResponse{payload: string(data), moderatorGroups: slices.Sorted(maps.Keys(moderatorGroups))}, nil
 }
 
 type MatchRpcRequest struct {

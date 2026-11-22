@@ -505,33 +505,80 @@ func TestMatchRPC_ModeratorListedOnlyForOperatorAuditorAndGuildAdmin(t *testing.
 	}
 }
 
-func TestMatchListPublicRPC_LabelsAndPlayerCountHaveNoModerator(t *testing.T) {
-	f := newModFixture(t)
-	nk := &moderatorNK{locationLabelNK: locationLabelNK{label: f.label}, f: f, caller: modCaller{userID: "operator-user", operator: true}}
-	h := NewRPCHandler(context.Background(), nil, nil)
+type publicListResponse struct {
+	PlayerCount int `json:"player_count"`
+	Labels      []listedLabel
+}
 
-	out, err := h.MatchListPublicRPC(matchRPCContext("operator-user"), NewRuntimeGoLogger(zap.NewNop()), nil, nk, "")
+func listPublic(t *testing.T, h *RPCHandler, c rpcCaller, f *modFixture) (string, publicListResponse) {
+	t.Helper()
+	nk := &moderatorNK{locationLabelNK: locationLabelNK{label: f.label}, f: f, caller: c.modCaller}
+	out, err := h.MatchListPublicRPC(rpcContext(c), NewRuntimeGoLogger(zap.NewNop()), rpcDB(t, c), nk, "")
 	if err != nil {
 		t.Fatalf("MatchListPublicRPC: %v", err)
 	}
-	for _, s := range f.moderatorStrings() {
-		if strings.Contains(out, s) {
-			t.Errorf("public list contains moderator value %q", s)
-		}
-	}
-	var resp struct {
-		PlayerCount int `json:"player_count"`
-		Labels      []listedLabel
-	}
+	var resp publicListResponse
 	if err := json.Unmarshal([]byte(out), &resp); err != nil {
 		t.Fatal(err)
 	}
-	// Every distinct row but the moderator's two: four players and the held seat.
-	if resp.PlayerCount != 5 {
-		t.Errorf("player_count = %d, want 5", resp.PlayerCount)
+	return out, resp
+}
+
+func TestMatchListPublicRPC_ModeratorListedOnlyForOperatorAuditorAndGuildAdmin(t *testing.T) {
+	for _, c := range rpcCallers(newModFixture(t)) {
+		t.Run(c.name, func(t *testing.T) {
+			useBotUserID(t)
+			f := newModFixture(t)
+			h := NewRPCHandler(context.Background(), nil, nil)
+
+			out, resp := listPublic(t, h, c, f)
+
+			assertModeratorValues(t, "public list", out, f, c.seesMods)
+			// Every distinct row but the moderator's two: four players and the held seat.
+			wantPlayers, wantSize, wantReservations := 5, 4, 1
+			if c.seesMods {
+				wantPlayers, wantSize, wantReservations = 7, 5, 2
+			}
+			if resp.PlayerCount != wantPlayers {
+				t.Errorf("player_count = %d, want %d", resp.PlayerCount, wantPlayers)
+			}
+			if len(resp.Labels) != 1 || resp.Labels[0].Size != wantSize || resp.Labels[0].ReservationCount != wantReservations {
+				t.Errorf("public list label = %+v, want size %d and reservation_count %d", resp.Labels, wantSize, wantReservations)
+			}
+		})
 	}
-	if len(resp.Labels) != 1 || resp.Labels[0].Size != 4 || resp.Labels[0].ReservationCount != 1 {
-		t.Errorf("public list label = %+v, want size 4 and reservation_count 1", resp.Labels)
+}
+
+// The cached response stays the one without moderators: a privileged caller is
+// answered from a fresh listing, and neither a privileged caller before it nor one
+// after it changes what the others get.
+func TestMatchListPublicRPC_CacheStaysFilteredForOthers(t *testing.T) {
+	useBotUserID(t)
+	f := newModFixture(t)
+	callers := rpcCallers(f)
+	pick := func(name string) rpcCaller {
+		for _, c := range callers {
+			if c.name == name {
+				return c
+			}
+		}
+		t.Fatalf("no caller %q", name)
+		return rpcCaller{}
+	}
+	h := NewRPCHandler(context.Background(), nil, nil)
+
+	for _, step := range []struct {
+		caller string
+		sees   bool
+	}{
+		{"global operator", true}, // fills the cache
+		{"outsider", false},       // served from the cache
+		{"guild admin", true},     // cache is warm; still unfiltered
+		{"auditor", true},
+		{"guild member", false},
+	} {
+		out, _ := listPublic(t, h, pick(step.caller), f)
+		assertModeratorValues(t, step.caller, out, f, step.sees)
 	}
 }
 
