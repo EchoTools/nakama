@@ -106,8 +106,7 @@ type (
 		pingTimer              *time.Timer
 		pingTimerCAS           *atomic.Uint32
 		outgoingCh             chan []byte
-		outgoingPending        atomic.Int64 // frames queued by SendBytes and not yet written (or abandoned) by processOutgoing
-		outgoingRunning        atomic.Bool  // processOutgoing is running, so queued frames will be written
+		outgoingDone           chan struct{} // closed when processOutgoing exits; nil until Consume starts it. Guarded by the session lock.
 		closeMu                sync.Mutex
 
 		storageIndex StorageIndex
@@ -403,10 +402,13 @@ func (s *sessionWS) Consume() {
 		return nil
 	})
 
-	// Start a routine to process outbound messages. It is marked running before it
-	// starts, so a Close that arrives at once still waits for the queue.
-	s.outgoingRunning.Store(true)
-	go s.processOutgoing()
+	// Start a routine to process outbound messages. Close waits on done, so frames
+	// queued before a Close are written ahead of the close frame.
+	done := make(chan struct{})
+	s.Lock()
+	s.outgoingDone = done
+	s.Unlock()
+	go s.processOutgoing(done)
 
 	var reason string
 	var data []byte
@@ -581,7 +583,11 @@ func (s *sessionWS) maybeResetPingTimer() bool {
 	return true
 }
 
-func (s *sessionWS) processOutgoing() {
+// processOutgoing writes queued frames to the socket until the session closes or
+// a write fails. When the session closes it first writes every frame still in the
+// queue (flushOutgoing), so a frame sent just before a Close reaches the client
+// ahead of the close frame. It closes done as it exits; Close waits on that.
+func (s *sessionWS) processOutgoing(done chan struct{}) {
 	var reason string
 	s.Lock()
 	ctx := s.ctx
@@ -600,82 +606,100 @@ OutgoingLoop:
 				break OutgoingLoop
 			}
 		case payload := <-s.outgoingCh:
-			s.Lock()
-			if s.stopped {
-				// The connection may have stopped between the payload being queued on the outgoing channel and reaching here.
-				// If that's the case then abort outgoing processing at this point and exit.
-				s.Unlock()
-				break OutgoingLoop
-			}
-
-			// Process the outgoing message queue.
-			if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeWaitDuration)); err != nil {
-				s.Unlock()
-				s.logger.Warn("Failed to set write deadline", zap.Error(err))
+			// A frame taken after Close has begun is still written: Close waits for
+			// this routine before it sends the close frame.
+			if err := s.writeOutgoing(payload); err != nil {
 				reason = err.Error()
 				break OutgoingLoop
 			}
-
-			// Batch: open a single WebSocket writer and drain all pending messages into it.
-			// Only EVR sessions support concatenating multiple messages in one frame;
-			// JSON and protobuf formats require one message per WebSocket frame.
-			w, err := s.conn.NextWriter(s.wsMessageType)
-			if err != nil {
-				s.Unlock()
-				s.logger.Warn("Could not get WebSocket writer", zap.Error(err))
-				reason = err.Error()
-				break OutgoingLoop
-			}
-			bytesSent := int64(len(payload))
-			written := int64(1)
-			if _, err = w.Write(payload); err != nil {
-				_ = w.Close()
-				s.Unlock()
-				s.logger.Warn("Could not write message", zap.Error(err))
-				reason = err.Error()
-				break OutgoingLoop
-			}
-			// Drain any additional pending messages into the same frame.
-			// Only safe for EVR binary protocol which supports concatenated packets.
-			// Use non-blocking select to avoid racing on len(outgoingCh).
-			if s.format == SessionFormatEVR {
-			drainLoop:
-				for {
-					select {
-					case additional := <-s.outgoingCh:
-						if _, err = w.Write(additional); err != nil {
-							break drainLoop
-						}
-						bytesSent += int64(len(additional))
-						written++
-					default:
-						break drainLoop
-					}
-				}
-			}
-			if err != nil {
-				_ = w.Close()
-				s.Unlock()
-				s.logger.Warn("Could not write batched message", zap.Error(err))
-				reason = err.Error()
-				break OutgoingLoop
-			}
-			if err = w.Close(); err != nil {
-				s.Unlock()
-				s.logger.Warn("Could not close WebSocket writer", zap.Error(err))
-				reason = err.Error()
-				break OutgoingLoop
-			}
-			s.Unlock()
-			s.outgoingPending.Sub(written)
-
-			// Update outgoing message metrics.
-			s.metrics.MessageBytesSent(bytesSent)
 		}
 	}
-	// Nothing will be written from here on, so a Close must not wait for the queue.
-	s.outgoingRunning.Store(false)
+	if reason == "" {
+		// The session is closing (the context was cancelled, or a ping found the
+		// session stopped), not failing: write what is still queued.
+		reason = s.flushOutgoing()
+	}
+	// Signal before calling Close, so a Close from this routine does not wait on itself.
+	close(done)
+	if ctx.Err() != nil {
+		// Only Close cancels the session context, so a Close is already under way
+		// and its reason is the one logged. Calling Close here could take the
+		// session lock first and record this routine's reason instead.
+		return
+	}
 	s.Close(reason, runtime.PresenceReasonDisconnect)
+}
+
+// flushOutgoing writes the frames left in the queue when the session closes. It
+// returns when it finds the queue empty, or with the reason when a write fails.
+func (s *sessionWS) flushOutgoing() string {
+	for {
+		select {
+		case payload := <-s.outgoingCh:
+			if err := s.writeOutgoing(payload); err != nil {
+				return err.Error()
+			}
+		default:
+			return ""
+		}
+	}
+}
+
+// writeOutgoing writes one queued frame to the socket. EVR sessions also drain any
+// further queued frames into the same WebSocket message.
+func (s *sessionWS) writeOutgoing(payload []byte) error {
+	s.Lock()
+	defer s.Unlock()
+
+	if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeWaitDuration)); err != nil {
+		s.logger.Warn("Failed to set write deadline", zap.Error(err))
+		return err
+	}
+
+	// Batch: open a single WebSocket writer and drain all pending messages into it.
+	// Only EVR sessions support concatenating multiple messages in one frame;
+	// JSON and protobuf formats require one message per WebSocket frame.
+	w, err := s.conn.NextWriter(s.wsMessageType)
+	if err != nil {
+		s.logger.Warn("Could not get WebSocket writer", zap.Error(err))
+		return err
+	}
+	bytesSent := int64(len(payload))
+	if _, err = w.Write(payload); err != nil {
+		_ = w.Close()
+		s.logger.Warn("Could not write message", zap.Error(err))
+		return err
+	}
+	// Drain any additional pending messages into the same frame.
+	// Only safe for EVR binary protocol which supports concatenated packets.
+	// Use non-blocking select to avoid racing on len(outgoingCh).
+	if s.format == SessionFormatEVR {
+	drainLoop:
+		for {
+			select {
+			case additional := <-s.outgoingCh:
+				if _, err = w.Write(additional); err != nil {
+					break drainLoop
+				}
+				bytesSent += int64(len(additional))
+			default:
+				break drainLoop
+			}
+		}
+	}
+	if err != nil {
+		_ = w.Close()
+		s.logger.Warn("Could not write batched message", zap.Error(err))
+		return err
+	}
+	if err = w.Close(); err != nil {
+		s.logger.Warn("Could not close WebSocket writer", zap.Error(err))
+		return err
+	}
+
+	// Update outgoing message metrics.
+	s.metrics.MessageBytesSent(bytesSent)
+	return nil
 }
 
 func (s *sessionWS) pingNow() (string, bool) {
@@ -790,14 +814,10 @@ func (s *sessionWS) Send(envelope *rtapi.Envelope, reliable bool) error {
 
 func (s *sessionWS) SendBytes(payload []byte, reliable bool) error {
 	// Attempt to queue messages and observe failures.
-	// Count the frame before it is queued, so a Close can never see an empty count
-	// while this frame is in the channel or in processOutgoing's hands.
-	s.outgoingPending.Inc()
 	select {
 	case s.outgoingCh <- payload:
 		return nil
 	default:
-		s.outgoingPending.Dec()
 		// The outgoing queue is full, likely because the remote client can't keep up.
 		// Terminate the connection immediately because the only alternative that doesn't block the server is
 		// to start dropping messages, which might cause unexpected behaviour.
@@ -825,17 +845,23 @@ func (s *sessionWS) CloseUnlock() {
 	s.closeMu.Unlock()
 }
 
-// awaitOutgoingDrain blocks until processOutgoing has written every frame queued
-// so far, for at most one write wait (the longest it may hold a single write
-// anyway). It returns at once when processOutgoing is not running, because then
-// nothing would ever write the queue.
-func (s *sessionWS) awaitOutgoingDrain() {
-	if s.outgoingPending.Load() <= 0 || !s.outgoingRunning.Load() {
+// awaitOutgoing waits for processOutgoing to exit, for at most one write wait.
+// Close calls it after cancelling the context and marking the session stopped, so
+// no new work starts while it waits. What it waits for is flushOutgoing: the
+// frames still queued when the session stopped, plus any queued while those are
+// written, until processOutgoing finds the queue empty or a write fails. A sender
+// that keeps queueing therefore holds it to the deadline, never past it. done is
+// nil when processOutgoing was never started, and then it returns at once.
+func (s *sessionWS) awaitOutgoing(done <-chan struct{}) {
+	if done == nil {
 		return
 	}
-	deadline := time.Now().Add(s.writeWaitDuration)
-	for s.outgoingPending.Load() > 0 && s.outgoingRunning.Load() && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	timer := time.NewTimer(s.writeWaitDuration)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		s.logger.Debug("Gave up waiting for queued frames before closing", zap.Duration("write_wait", s.writeWaitDuration))
 	}
 }
 
@@ -843,11 +869,6 @@ func (s *sessionWS) awaitOutgoingDrain() {
 // logged and sent to EventSessionEnd is the first caller's; later calls return
 // without effect. An empty msg means the client closed the socket.
 func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes ...*rtapi.Envelope) {
-	// Frames already queued (a refusal sent just before closing, say) are written
-	// first. Cancelling the context or setting stopped makes processOutgoing exit
-	// without writing what it holds or what is still in the channel.
-	s.awaitOutgoingDrain()
-
 	s.CloseLock()
 	// Cancel any ongoing operations tied to this session.
 	s.ctxCancelFn()
@@ -859,6 +880,7 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 		return
 	}
 	s.stopped = true
+	outgoingDone := s.outgoingDone
 	s.Unlock()
 
 	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
@@ -889,6 +911,10 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 
 	// Clean up internals.
 	s.pingTimer.Stop()
+
+	// Frames queued before the close (a registration refusal, say) reach the
+	// client ahead of the close frame: processOutgoing writes them on its way out.
+	s.awaitOutgoing(outgoingDone)
 
 	for _, envelope := range envelopes {
 		var payload []byte
