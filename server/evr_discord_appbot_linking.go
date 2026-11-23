@@ -76,7 +76,6 @@ func (d *DiscordAppBot) linkHeadset(ctx context.Context, logger runtime.Logger, 
 	}(); err != nil {
 		logger.WithFields(map[string]interface{}{
 			"discord_id": discordID,
-			"link_code":  linkCode,
 			"error":      err,
 		}).Error("Failed to link headset")
 		return err

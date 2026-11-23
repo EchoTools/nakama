@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/heroiclabs/nakama-common/runtime"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -76,5 +77,54 @@ func TestDeviceAuthDoesNotLogCode(t *testing.T) {
 	_, err = deviceAuthVerify(ctx, logger, nk, fakeDiscordLookup, limiter, codePayload(strings.ToLower(secret)))
 	require.NoError(t, err)
 
+	requireLoggedWithout(t, logs, secret)
+}
+
+func TestLinkSlashCommandsDoNotLogLinkCode(t *testing.T) {
+	const secret = "ZQXW"
+	for _, name := range []string{"link", "link-headset"} {
+		logger, logs := newObservedLogger()
+		i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{
+			Type: discordgo.InteractionApplicationCommand,
+			Data: discordgo.ApplicationCommandInteractionData{
+				Name: name,
+				Options: []*discordgo.ApplicationCommandInteractionDataOption{
+					{Name: "link-code", Type: discordgo.ApplicationCommandOptionString, Value: secret},
+				},
+			},
+		}}
+		logApplicationCommand(logger, i)
+		requireLoggedWithout(t, logs, secret)
+	}
+}
+
+func TestLinkSlashCommandsKeepOtherOptionsInLog(t *testing.T) {
+	logger, logs := newObservedLogger()
+	i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{
+		Type: discordgo.InteractionApplicationCommand,
+		Data: discordgo.ApplicationCommandInteractionData{
+			Name: "whoami",
+			Options: []*discordgo.ApplicationCommandInteractionDataOption{
+				{Name: "user", Type: discordgo.ApplicationCommandOptionString, Value: "someone"},
+			},
+		},
+	}}
+	logApplicationCommand(logger, i)
+	b, _ := json.Marshal(logs.All()[0].ContextMap()["options"])
+	require.Contains(t, string(b), "someone")
+}
+
+func TestFailedHeadsetLinkDoesNotLogLinkCode(t *testing.T) {
+	const secret = "ZQXW"
+	logger, logs := newObservedLogger()
+	cache := &DiscordIntegrator{idcache: &MapOf[string, string]{}}
+	cache.idcache.Store("guild-1", "group-1")
+	cache.idcache.Store("discord-1", "user-1")
+	bot := &DiscordAppBot{nk: &fakeDeviceAuthNK{}, cache: cache}
+	member := &discordgo.Member{GuildID: "guild-1", User: &discordgo.User{ID: "discord-1", Username: "alice"}}
+
+	err := bot.linkHeadset(context.Background(), logger, member, secret)
+	require.Error(t, err)
+	require.NotContains(t, strings.ToUpper(err.Error()), secret)
 	requireLoggedWithout(t, logs, secret)
 }

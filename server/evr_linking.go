@@ -155,7 +155,7 @@ func ExchangeLinkCode(ctx context.Context, nk runtime.NakamaModule, logger runti
 
 	linkTicket, ok := linkTickets[linkCode]
 	if !ok {
-		return nil, runtime.NewError(fmt.Sprintf("link code `%s` not found", linkCode), StatusNotFound)
+		return nil, runtime.NewError("link code not found", StatusNotFound)
 	}
 
 	delete(linkTickets, linkCode)
