@@ -129,11 +129,11 @@ func TestErrFailedRegistration_DeliversFailureFrameBeforeClose(t *testing.T) {
 // closed once, and the refusal does not wait out the delay.
 func TestErrFailedRegistration_SessionClosesFirst(t *testing.T) {
 	session, client := refusalTestSession(t, 30*time.Second)
-	go readFrames(client)
+	go func() { _, _ = readFrames(client) }()
 
 	returned := make(chan struct{})
 	go func() {
-		errFailedRegistration(session, zap.NewNop(), errors.New("refused"), evr.BroadcasterRegistration_Unknown)
+		_ = errFailedRegistration(session, zap.NewNop(), errors.New("refused"), evr.BroadcasterRegistration_Unknown)
 		close(returned)
 	}()
 
