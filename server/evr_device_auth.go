@@ -207,7 +207,7 @@ func deviceAuthRequest(ctx context.Context, logger runtime.Logger, nk runtime.Na
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
-	logger.WithField("code", code).Info("Device auth code generated")
+	logger.Info("Device auth code generated")
 
 	response, _ := json.Marshal(map[string]interface{}{
 		"code":       code,
@@ -381,7 +381,7 @@ func deviceAuthVerify(ctx context.Context, logger runtime.Logger, nk runtime.Nak
 		return "", runtime.NewError("internal error", StatusInternalError)
 	}
 
-	logger.WithFields(map[string]interface{}{"code": code, "username": username, "user_id": userID, "token_expiry": tokenExpiry}).Info("Device auth code verified")
+	logger.WithFields(map[string]interface{}{"username": username, "user_id": userID, "token_expiry": tokenExpiry}).Info("Device auth code verified")
 
 	response, _ := json.Marshal(map[string]string{
 		"status":   "ok",
