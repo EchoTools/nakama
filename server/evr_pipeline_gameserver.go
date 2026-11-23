@@ -155,6 +155,17 @@ func errFailedRegistration(session *sessionWS, logger *zap.Logger, err error, co
 			logger.Warn("Failed to send registration failure message", zap.Error(sendErr))
 		}
 	}
+	// Closing now would cancel the session's outgoing loop and drop the frame queued
+	// above, so the server would see only a bare close (1005) and never the failure
+	// code. Wait up to one write wait for it to flush, then close. This also holds
+	// the read loop, which runs this handler and would otherwise close the session
+	// itself the moment an error is returned. If the session closes on its own
+	// first, stop waiting: Close is idempotent, so nothing is closed twice and no
+	// goroutine is left behind.
+	select {
+	case <-time.After(session.writeWaitDuration):
+	case <-session.Context().Done():
+	}
 	session.Close(err.Error(), runtime.PresenceReasonDisconnect)
 	return fmt.Errorf("failed to register game server: %w", err)
 }
