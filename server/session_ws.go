@@ -106,6 +106,8 @@ type (
 		pingTimer              *time.Timer
 		pingTimerCAS           *atomic.Uint32
 		outgoingCh             chan []byte
+		outgoingPending        atomic.Int64 // frames queued by SendBytes and not yet written (or abandoned) by processOutgoing
+		outgoingRunning        atomic.Bool  // processOutgoing is running, so queued frames will be written
 		closeMu                sync.Mutex
 
 		storageIndex StorageIndex
@@ -401,7 +403,9 @@ func (s *sessionWS) Consume() {
 		return nil
 	})
 
-	// Start a routine to process outbound messages.
+	// Start a routine to process outbound messages. It is marked running before it
+	// starts, so a Close that arrives at once still waits for the queue.
+	s.outgoingRunning.Store(true)
 	go s.processOutgoing()
 
 	var reason string
@@ -623,6 +627,7 @@ OutgoingLoop:
 				break OutgoingLoop
 			}
 			bytesSent := int64(len(payload))
+			written := int64(1)
 			if _, err = w.Write(payload); err != nil {
 				_ = w.Close()
 				s.Unlock()
@@ -642,6 +647,7 @@ OutgoingLoop:
 							break drainLoop
 						}
 						bytesSent += int64(len(additional))
+						written++
 					default:
 						break drainLoop
 					}
@@ -661,11 +667,14 @@ OutgoingLoop:
 				break OutgoingLoop
 			}
 			s.Unlock()
+			s.outgoingPending.Sub(written)
 
 			// Update outgoing message metrics.
 			s.metrics.MessageBytesSent(bytesSent)
 		}
 	}
+	// Nothing will be written from here on, so a Close must not wait for the queue.
+	s.outgoingRunning.Store(false)
 	s.Close(reason, runtime.PresenceReasonDisconnect)
 }
 
@@ -781,10 +790,14 @@ func (s *sessionWS) Send(envelope *rtapi.Envelope, reliable bool) error {
 
 func (s *sessionWS) SendBytes(payload []byte, reliable bool) error {
 	// Attempt to queue messages and observe failures.
+	// Count the frame before it is queued, so a Close can never see an empty count
+	// while this frame is in the channel or in processOutgoing's hands.
+	s.outgoingPending.Inc()
 	select {
 	case s.outgoingCh <- payload:
 		return nil
 	default:
+		s.outgoingPending.Dec()
 		// The outgoing queue is full, likely because the remote client can't keep up.
 		// Terminate the connection immediately because the only alternative that doesn't block the server is
 		// to start dropping messages, which might cause unexpected behaviour.
@@ -812,10 +825,29 @@ func (s *sessionWS) CloseUnlock() {
 	s.closeMu.Unlock()
 }
 
+// awaitOutgoingDrain blocks until processOutgoing has written every frame queued
+// so far, for at most one write wait (the longest it may hold a single write
+// anyway). It returns at once when processOutgoing is not running, because then
+// nothing would ever write the queue.
+func (s *sessionWS) awaitOutgoingDrain() {
+	if s.outgoingPending.Load() <= 0 || !s.outgoingRunning.Load() {
+		return
+	}
+	deadline := time.Now().Add(s.writeWaitDuration)
+	for s.outgoingPending.Load() > 0 && s.outgoingRunning.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // Close ends the session. The first caller wins (s.stopped), so the reason
 // logged and sent to EventSessionEnd is the first caller's; later calls return
 // without effect. An empty msg means the client closed the socket.
 func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes ...*rtapi.Envelope) {
+	// Frames already queued (a refusal sent just before closing, say) are written
+	// first. Cancelling the context or setting stopped makes processOutgoing exit
+	// without writing what it holds or what is still in the channel.
+	s.awaitOutgoingDrain()
+
 	s.CloseLock()
 	// Cancel any ongoing operations tied to this session.
 	s.ctxCancelFn()
