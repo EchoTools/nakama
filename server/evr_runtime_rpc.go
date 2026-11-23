@@ -510,7 +510,8 @@ type DiscordSignInRpcResponse struct {
 // stores the JWT in the user's metadata, and returns the session token and Discord username as a jsonN response.
 // If any error occurs during the process, an error message is returned.
 func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, payload string) (string, error) {
-	logger.WithField("payload", payload).Info("DiscordSignInRpc")
+	// The payload carries the OAuth authorization code; never log it.
+	logger.Info("DiscordSignInRpc")
 
 	vars, _ := ctx.Value(runtime.RUNTIME_CTX_ENV).(map[string]string)
 	clientId := vars["DISCORD_CLIENT_ID"]
@@ -520,7 +521,7 @@ func DiscordSignInRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk
 	// Parse the payload into a LoginRequest object
 	var request DiscordSignInRpcRequest
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+		logger.WithField("err", err).Error("Unable to unmarshal payload")
 		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
 	}
 	if request.Code == "" {
@@ -619,7 +620,7 @@ func LinkDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB, nk ru
 	// Unmarshal the payload into a LinkDeviceRpcRequest struct
 	var request LinkDeviceRpcRequest
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+		logger.WithField("err", err).Error("Unable to unmarshal payload")
 		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
 	}
 
@@ -670,7 +671,7 @@ func LinkUserIdDeviceRpc(ctx context.Context, logger runtime.Logger, db *sql.DB,
 	// Unmarshal the payload into a LinkUserIdDeviceRpcRequest struct
 	var request LinkUserIdDeviceRpcRequest
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		logger.WithField("err", err).WithField("payload", payload).Error("Unable to unmarshal payload")
+		logger.WithField("err", err).Error("Unable to unmarshal payload")
 		return "", runtime.NewError("Unable to unmarshal payload", StatusInvalidArgument)
 	}
 

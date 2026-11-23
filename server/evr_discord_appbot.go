@@ -3608,12 +3608,7 @@ func (d *DiscordAppBot) RegisterSlashCommands() error {
 		case discordgo.InteractionApplicationCommand:
 
 			appCommandName := i.ApplicationCommandData().Name
-			logger = logger.WithFields(map[string]any{
-				"app_command": appCommandName,
-				"options":     i.ApplicationCommandData().Options,
-			})
-
-			logger.Info("Handling application command.")
+			logger = logApplicationCommand(logger, i)
 			if handler, ok := commandHandlers[appCommandName]; ok {
 				err := d.handleInteractionApplicationCommand(ctx, logger, s, i, appCommandName, handler)
 				if err != nil {
@@ -4862,4 +4857,20 @@ func isExpectedUserError(err error) bool {
 		return true
 	}
 	return false
+}
+
+// logApplicationCommand logs the Info "Handling application command." line and
+// returns the logger carrying the command fields. The link commands' only option
+// is the link code, so their options are not logged.
+func logApplicationCommand(logger runtime.Logger, i *discordgo.InteractionCreate) runtime.Logger {
+	data := i.ApplicationCommandData()
+	fields := map[string]any{"app_command": data.Name}
+	switch data.Name {
+	case "link", "link-headset":
+	default:
+		fields["options"] = data.Options
+	}
+	logger = logger.WithFields(fields)
+	logger.Info("Handling application command.")
+	return logger
 }
