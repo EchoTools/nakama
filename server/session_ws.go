@@ -106,7 +106,9 @@ type (
 		pingTimer              *time.Timer
 		pingTimerCAS           *atomic.Uint32
 		outgoingCh             chan []byte
-		outgoingDone           chan struct{} // closed when processOutgoing exits; nil until Consume starts it. Guarded by the session lock.
+		outgoingStop           chan struct{}     // closed by the Close that stops the session; nil until Consume starts processOutgoing. Guarded by the session lock.
+		outgoingDone           chan struct{}     // closed when processOutgoing has closed the socket and exited. Guarded by the session lock.
+		closeEnvelopes         []*rtapi.Envelope // the stopping Close's envelopes, for processOutgoing to write. Set before outgoingStop is closed.
 		closeMu                sync.Mutex
 
 		storageIndex StorageIndex
@@ -402,13 +404,17 @@ func (s *sessionWS) Consume() {
 		return nil
 	})
 
-	// Start a routine to process outbound messages. Close waits on done, so frames
-	// queued before a Close are written ahead of the close frame.
-	done := make(chan struct{})
+	// Start a routine to process outbound messages. It owns the socket's writes
+	// from here on, including the close: see processOutgoing. If a Close has
+	// already stopped the session, that Close closes the socket itself, and a
+	// routine started now would wait for a stop that never comes.
 	s.Lock()
-	s.outgoingDone = done
+	if !s.stopped {
+		s.outgoingStop = make(chan struct{})
+		s.outgoingDone = make(chan struct{})
+		go s.processOutgoing(s.outgoingStop, s.outgoingDone)
+	}
 	s.Unlock()
-	go s.processOutgoing(done)
 
 	var reason string
 	var data []byte
@@ -583,11 +589,19 @@ func (s *sessionWS) maybeResetPingTimer() bool {
 	return true
 }
 
-// processOutgoing writes queued frames to the socket until the session closes or
-// a write fails. When the session closes it first writes every frame still in the
-// queue (flushOutgoing), so a frame sent just before a Close reaches the client
-// ahead of the close frame. It closes done as it exits; Close waits on that.
-func (s *sessionWS) processOutgoing(done chan struct{}) {
+// processOutgoing writes queued frames to the socket until the session stops or
+// a write fails, and then closes the socket itself. Once it runs, it is the only
+// routine that writes to the socket, so the close frame is the last frame sent.
+//
+// When a Close stops the session (stop is closed), it writes the frames that were
+// still queued, so a frame sent just before a Close (a registration refusal, say)
+// reaches the client ahead of the close frame. Those frames share one write wait,
+// so a slow or stalled client cannot stretch them out frame by frame. Then it
+// writes the Close's envelopes and the close frame, each with its own write wait
+// as Close did before, and closes the socket. Close does not wait for any of it.
+// done is closed when the socket is closed.
+func (s *sessionWS) processOutgoing(stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
 	var reason string
 	s.Lock()
 	ctx := s.ctx
@@ -595,63 +609,67 @@ func (s *sessionWS) processOutgoing(done chan struct{}) {
 OutgoingLoop:
 	for {
 		select {
-		case <-ctx.Done():
-			// Session is closing, close the outgoing process routine.
+		case <-stop:
 			break OutgoingLoop
 		case <-s.pingTimer.C:
 			// Periodically send pings.
 			if msg, ok := s.pingNow(); !ok {
-				// If ping fails the session will be stopped, clean up the loop.
+				// An empty msg means the session has stopped, and stop is closed too.
 				reason = msg
 				break OutgoingLoop
 			}
 		case payload := <-s.outgoingCh:
-			// A frame taken after Close has begun is still written: Close waits for
-			// this routine before it sends the close frame.
-			if err := s.writeOutgoing(payload); err != nil {
+			if err := s.writeOutgoing(payload, time.Now().Add(s.writeWaitDuration)); err != nil {
 				reason = err.Error()
 				break OutgoingLoop
 			}
 		}
 	}
-	if reason == "" {
-		// The session is closing (the context was cancelled, or a ping found the
-		// session stopped), not failing: write what is still queued.
-		reason = s.flushOutgoing()
-	}
-	// Signal before calling Close, so a Close from this routine does not wait on itself.
-	close(done)
-	if ctx.Err() != nil {
-		// Only Close cancels the session context, so a Close is already under way
-		// and its reason is the one logged. Calling Close here could take the
-		// session lock first and record this routine's reason instead.
+
+	if reason != "" {
+		// A write failed: the socket is broken, so there is nothing left to flush.
+		// Only Close cancels the session context, so if it is cancelled a Close is
+		// already under way and its reason is the one to log; a Close from here
+		// could take the session lock first and record this routine's reason.
+		if ctx.Err() == nil {
+			s.Close(reason, runtime.PresenceReasonDisconnect)
+		}
+		// Either way a Close has stopped the session, or is about to. Closing the
+		// socket before then would let Consume's read error close it first.
+		<-stop
+		s.closeConn(nil)
 		return
 	}
-	s.Close(reason, runtime.PresenceReasonDisconnect)
+
+	deadline := time.Now().Add(s.writeWaitDuration)
+	s.flushOutgoing(deadline)
+	// stop is closed after closeEnvelopes is set, so this read sees the Close's envelopes.
+	s.closeConn(s.closeEnvelopes)
 }
 
-// flushOutgoing writes the frames left in the queue when the session closes. It
-// returns when it finds the queue empty, or with the reason when a write fails.
-func (s *sessionWS) flushOutgoing() string {
-	for {
+// flushOutgoing writes the frames that are queued when the session stops, all
+// by deadline. Frames queued after it starts are not written: a sender that keeps
+// queueing cannot hold the socket open. It stops at the first failed write.
+func (s *sessionWS) flushOutgoing(deadline time.Time) {
+	for n := len(s.outgoingCh); n > 0; n-- {
 		select {
 		case payload := <-s.outgoingCh:
-			if err := s.writeOutgoing(payload); err != nil {
-				return err.Error()
+			if s.writeOutgoing(payload, deadline) != nil {
+				return
 			}
 		default:
-			return ""
+			return
 		}
 	}
 }
 
 // writeOutgoing writes one queued frame to the socket. EVR sessions also drain any
 // further queued frames into the same WebSocket message.
-func (s *sessionWS) writeOutgoing(payload []byte) error {
+func (s *sessionWS) writeOutgoing(payload []byte, deadline time.Time) error {
 	s.Lock()
 	defer s.Unlock()
 
-	if err := s.conn.SetWriteDeadline(time.Now().Add(s.writeWaitDuration)); err != nil {
+	if err := s.conn.SetWriteDeadline(deadline); err != nil {
 		s.logger.Warn("Failed to set write deadline", zap.Error(err))
 		return err
 	}
@@ -845,29 +863,15 @@ func (s *sessionWS) CloseUnlock() {
 	s.closeMu.Unlock()
 }
 
-// awaitOutgoing waits for processOutgoing to exit, for at most one write wait.
-// Close calls it after cancelling the context and marking the session stopped, so
-// no new work starts while it waits. What it waits for is flushOutgoing: the
-// frames still queued when the session stopped, plus any queued while those are
-// written, until processOutgoing finds the queue empty or a write fails. A sender
-// that keeps queueing therefore holds it to the deadline, never past it. done is
-// nil when processOutgoing was never started, and then it returns at once.
-func (s *sessionWS) awaitOutgoing(done <-chan struct{}) {
-	if done == nil {
-		return
-	}
-	timer := time.NewTimer(s.writeWaitDuration)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
-		s.logger.Debug("Gave up waiting for queued frames before closing", zap.Duration("write_wait", s.writeWaitDuration))
-	}
-}
-
 // Close ends the session. The first caller wins (s.stopped), so the reason
 // logged and sent to EventSessionEnd is the first caller's; later calls return
 // without effect. An empty msg means the client closed the socket.
+//
+// Close stops the session and cleans up after it, but once Consume has started
+// processOutgoing, it leaves the socket to that routine, which writes what is
+// queued, the envelopes and the close frame, and then closes the socket. Close
+// does not wait for it. Without processOutgoing, Close writes and closes the
+// socket itself.
 func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes ...*rtapi.Envelope) {
 	s.CloseLock()
 	// Cancel any ongoing operations tied to this session.
@@ -880,7 +884,11 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 		return
 	}
 	s.stopped = true
-	outgoingDone := s.outgoingDone
+	writerOwnsSocket := s.outgoingStop != nil
+	if writerOwnsSocket {
+		s.closeEnvelopes = envelopes
+		close(s.outgoingStop)
+	}
 	s.Unlock()
 
 	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
@@ -912,16 +920,27 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 	// Clean up internals.
 	s.pingTimer.Stop()
 
-	// Frames queued before the close (a registration refusal, say) reach the
-	// client ahead of the close frame: processOutgoing writes them on its way out.
-	s.awaitOutgoing(outgoingDone)
+	if !writerOwnsSocket {
+		s.closeConn(envelopes)
+	}
 
+	logSessionClosed(s.logger, msg, reason)
+
+	// Fire an event for session end.
+	if fn := s.runtime.EventSessionEnd(); fn != nil {
+		fn(s.userID.String(), s.username.Load(), s.vars, s.expiry, s.id.String(), s.clientIP, s.clientPort, s.lang, time.Now().UTC().Unix(), msg)
+	}
+}
+
+// closeConn writes the envelopes, then the close frame, and closes the socket.
+func (s *sessionWS) closeConn(envelopes []*rtapi.Envelope) {
+	isDebug := s.logger.Core().Enabled(zap.DebugLevel)
 	for _, envelope := range envelopes {
 		var payload []byte
 		var err error
 		switch s.format {
 		case SessionFormatEVR:
-			if s.logger.Core().Enabled(zap.DebugLevel) {
+			if isDebug {
 				s.logger.Warn("Blocked attempt to send protobuf message to EVR client.", zap.Any("envelope", envelope))
 			}
 			continue
@@ -970,13 +989,6 @@ func (s *sessionWS) Close(msg string, reason runtime.PresenceReason, envelopes .
 	// Close WebSocket.
 	if err := s.conn.Close(); err != nil {
 		s.logger.Debug("Could not close", zap.Error(err))
-	}
-
-	logSessionClosed(s.logger, msg, reason)
-
-	// Fire an event for session end.
-	if fn := s.runtime.EventSessionEnd(); fn != nil {
-		fn(s.userID.String(), s.username.Load(), s.vars, s.expiry, s.id.String(), s.clientIP, s.clientPort, s.lang, time.Now().UTC().Unix(), msg)
 	}
 }
 
