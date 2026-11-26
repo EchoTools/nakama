@@ -32,6 +32,11 @@ type GuildEnforcementEditEntry struct {
 	NewAuditorNotes       string    `json:"new_auditor_notes"`
 	PreviousAllowPrivates bool      `json:"previous_allow_privates,omitempty"`
 	NewAllowPrivates      bool      `json:"new_allow_privates,omitempty"`
+
+	PreviousCommunityValuesRequired bool              `json:"previous_community_values_required,omitempty"`
+	NewCommunityValuesRequired      bool              `json:"new_community_values_required,omitempty"`
+	PreviousStringProperties        map[string]string `json:"previous_string_properties,omitempty"`
+	NewStringProperties             map[string]string `json:"new_string_properties,omitempty"`
 }
 
 type GuildEnforcementRecord struct {
@@ -54,6 +59,12 @@ type GuildEnforcementRecord struct {
 	IsPubliclyVisible       bool      `json:"is_publicly_visible,omitempty"`       // Whether this record should appear in public logs
 	DMNotificationSent      bool      `json:"dm_notification_sent,omitempty"`      // Tracks if DM notification was successfully sent
 	DMNotificationAttempted time.Time `json:"dm_notification_attempted,omitempty"` // When DM notification was attempted
+
+	// StringProperties are key/value tags an inheriting guild can filter on
+	// (SuspensionInheritanceFilter). The issuer sets them at write time; nakama
+	// adds its own nakama-owned keys (see evr_enforcement_string_properties.go)
+	// and never interprets the rest.
+	StringProperties map[string]string `json:"string_properties,omitempty"`
 
 	// EditLog contains the history of edits made to this record (internal only, not displayed)
 	EditLog []GuildEnforcementEditEntry `json:"edit_log,omitempty"`

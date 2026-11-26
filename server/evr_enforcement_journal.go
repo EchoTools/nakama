@@ -228,6 +228,7 @@ func (s *GuildEnforcementJournal) AddRecordWithOptions(groupID, enforcerUserID, 
 		IsPubliclyVisible:       isPubliclyVisible,
 		DMNotificationSent:      false,
 	}
+	record.mergeStringProperties(nil)
 	s.RecordsByGroupID[groupID] = append(s.RecordsByGroupID[groupID], record)
 
 	return record
@@ -270,41 +271,20 @@ func (s *GuildEnforcementJournal) GetRecord(groupID, recordID string) *GuildEnfo
 }
 
 // EditRecord updates a record and logs the edit. Returns the updated record or nil if not found.
+// It keeps the record's CommunityValuesRequired and string properties; ApplyRecordEdit changes those too.
 func (s *GuildEnforcementJournal) EditRecord(groupID, recordID, editorUserID, editorDiscordID string, newExpiry time.Time, newUserNotice, newAuditorNotes string, allowPrivateLobbies bool) *GuildEnforcementRecord {
 	record := s.GetRecord(groupID, recordID)
 	if record == nil {
 		return nil
 	}
-
-	// Create edit log entry with previous values
-	editEntry := GuildEnforcementEditEntry{
-		EditorUserID:           editorUserID,
-		EditorDiscordID:        editorDiscordID,
-		EditedAt:               time.Now().UTC(),
-		PreviousExpiry:         record.Expiry,
-		PreviousUserNoticeText: record.UserNoticeText,
-		PreviousAuditorNotes:   record.AuditorNotes,
-		NewExpiry:              newExpiry,
-		NewUserNoticeText:      newUserNotice,
-		NewAuditorNotes:        newAuditorNotes,
-		PreviousAllowPrivates:  record.AllowPrivateLobbies,
-		NewAllowPrivates:       allowPrivateLobbies,
-	}
-
-	// Update the record
-	record.Expiry = newExpiry
-	record.UserNoticeText = newUserNotice
-	record.AuditorNotes = newAuditorNotes
-	record.AllowPrivateLobbies = allowPrivateLobbies
-	record.UpdatedAt = time.Now().UTC()
-
-	// Append to edit log
-	if record.EditLog == nil {
-		record.EditLog = make([]GuildEnforcementEditEntry, 0, 1)
-	}
-	record.EditLog = append(record.EditLog, editEntry)
-
-	return record
+	updated, _ := s.ApplyRecordEdit(groupID, recordID, editorUserID, editorDiscordID, enforcementRecordEdit{
+		Expiry:                  newExpiry,
+		UserNotice:              newUserNotice,
+		AuditorNotes:            newAuditorNotes,
+		AllowPrivateLobbies:     allowPrivateLobbies,
+		CommunityValuesRequired: record.CommunityValuesRequired,
+	})
+	return updated
 }
 
 // mergeStored reconciles s with stored — the same journal freshly re-read from
