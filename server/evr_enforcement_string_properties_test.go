@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -344,6 +346,109 @@ func TestEnforcementRecordEditRPC_LogsUnknownKeyNamesOnly(t *testing.T) {
 		t.Fatalf("edit: %v", err)
 	}
 	assertUnknownKeysLogged(t, logs, []string{"tier"}, "SECRETVALUE")
+}
+
+// assertOwnedKeysWarned fails unless logs hold a warn naming exactly the
+// nakama-owned keys want, and fails if secret (a value the caller sent) appears
+// anywhere in the logs.
+func assertOwnedKeysWarned(t *testing.T, logs *observer.ObservedLogs, want []string, secret string) {
+	t.Helper()
+	var found bool
+	for _, e := range logs.All() {
+		if strings.Contains(e.Message, secret) || strings.Contains(fmt.Sprint(e.ContextMap()), secret) {
+			t.Fatalf("a value was logged: %+v", e)
+		}
+		if e.Level == zapcore.WarnLevel && strings.Contains(e.Message, "nakama-owned") &&
+			fmt.Sprint(e.ContextMap()["keys"]) == fmt.Sprint(want) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no warn naming nakama-owned keys %v; logs: %+v", want, logs.All())
+	}
+}
+
+// A caller that sends a nakama-owned key has its value overwritten and gets a
+// warn naming the key (never its value), on both RPCs.
+func TestEnforcementRPCs_WarnOnNakamaOwnedStringProperties(t *testing.T) {
+	t.Run("kick", func(t *testing.T) {
+		f := newKickLogFixture(t)
+		useSuspensionLogSender(t, &fakeNoticeSender{})
+		logger, logs := propsObservedLogger()
+		out, err := EnforcementKickRPC(f.ctx, logger, nil, f.nk, f.payload(`,"string_properties":{"tier":"high","permanent":"SECRETVALUE"}`))
+		if err != nil {
+			t.Fatalf("kick: %v (%s)", err, out)
+		}
+		assertOwnedKeysWarned(t, logs, []string{StringPropertyPermanent}, "SECRETVALUE")
+	})
+	t.Run("edit", func(t *testing.T) {
+		f := newKickLogFixture(t)
+		useSuspensionLogSender(t, &fakeNoticeSender{})
+		runKickRPC(t, f, f.payload(""))
+		rec := onlyRecord(t, f)
+		logger, logs := propsObservedLogger()
+		if _, err := runEditRPC(t, f, logger, f.editPayload(rec.ID, `,"string_properties":{"tier":"low","permanent":"SECRETVALUE"}`)); err != nil {
+			t.Fatalf("edit: %v", err)
+		}
+		assertOwnedKeysWarned(t, logs, []string{StringPropertyPermanent}, "SECRETVALUE")
+	})
+}
+
+// The cap on caller-set properties holds on the stored record, not only on one
+// request: an edit whose merge would leave more than maxStringProperties
+// caller keys is refused with InvalidArgument naming the limit, and the record
+// is unchanged. Nakama-owned keys do not count toward the cap.
+func TestEnforcementRecordEditRPC_StringPropertyCapHoldsOnRecord(t *testing.T) {
+	props := func(prefix string, n int) string {
+		parts := make([]string, n)
+		for i := range n {
+			parts[i] = fmt.Sprintf("%q:\"v\"", fmt.Sprint(prefix, i))
+		}
+		return `,"string_properties":{` + strings.Join(parts, ",") + `}`
+	}
+	f := newKickLogFixture(t)
+	useSuspensionLogSender(t, &fakeNoticeSender{})
+	// A full record: 32 caller keys plus the nakama-owned ones.
+	runKickRPC(t, f, f.payload(props("a", maxStringProperties)))
+	rec := onlyRecord(t, f)
+	if len(rec.StringProperties) <= maxStringProperties {
+		t.Fatalf("setup: nakama-owned keys must sit on top of the cap, got %d keys", len(rec.StringProperties))
+	}
+
+	// Changing an existing key and deleting one keep it at or under the cap.
+	if _, err := runEditRPC(t, f, nil, f.editPayload(rec.ID, `,"string_properties":{"a0":"changed","a1":""}`)); err != nil {
+		t.Fatalf("an edit that stays within the cap must be accepted: %v", err)
+	}
+	// Back to exactly 32.
+	if _, err := runEditRPC(t, f, nil, f.editPayload(rec.ID, `,"string_properties":{"b0":"v"}`)); err != nil {
+		t.Fatalf("an edit that reaches the cap exactly must be accepted: %v", err)
+	}
+
+	// Two more keys would make 34.
+	_, err := runEditRPC(t, f, nil, f.editPayload(rec.ID, props("c", 2)))
+	if err == nil {
+		t.Fatal("an edit that grows the record past the cap must be refused")
+	}
+	var rerr *runtime.Error
+	if !errors.As(err, &rerr) || rerr.Code != StatusInvalidArgument {
+		t.Fatalf("err = %#v, want InvalidArgument", err)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprint(maxStringProperties)) {
+		t.Fatalf("the error must name the limit %d: %v", maxStringProperties, err)
+	}
+	stored := onlyRecord(t, f)
+	if _, ok := stored.StringProperties["c0"]; ok {
+		t.Fatalf("a refused edit must not be written: %v", stored.StringProperties)
+	}
+	var caller int
+	for k := range stored.StringProperties {
+		if !slices.Contains(nakamaStringPropertyKeys, k) {
+			caller++
+		}
+	}
+	if caller != maxStringProperties {
+		t.Fatalf("stored caller keys = %d, want %d", caller, maxStringProperties)
+	}
 }
 
 // --- filter side -------------------------------------------------------------

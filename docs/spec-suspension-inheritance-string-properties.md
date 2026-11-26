@@ -79,6 +79,11 @@ Rules for nakama-owned keys:
 - An edit that changes only properties is a real edit. An edit that changes
   nothing at all is still refused with "No changes specified".
 - Same limits as kick, except that `""` is allowed (it deletes).
+- The 32-key limit also holds on the **record after the merge**, not just on the
+  request. Only issuer keys count; the nakama-owned keys don't. An edit that
+  would leave the record with more than 32 issuer keys is refused with
+  `InvalidArgument` (HTTP 400) naming the limit, and nothing is written. Delete
+  keys (send them with `""`) in the same edit to make room.
 - The record's edit log records the properties before and after the edit.
 
 ### Unknown keys are logged

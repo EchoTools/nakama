@@ -591,6 +591,9 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	// compared after the merge, so the nakama-owned keys a legacy record lacks
 	// do not count as a change on their own.
 	preview := previewRecordEdit(*record, edit)
+	if err := validateRecordStringPropertyCap(preview.StringProperties); err != nil {
+		return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+	}
 	before := *record
 	before.mergeStringProperties(nil)
 	if newExpiry.Equal(record.Expiry) &&

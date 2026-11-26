@@ -77,6 +77,23 @@ func validateStringProperties(props map[string]string, allowEmptyValue bool) err
 	return nil
 }
 
+// validateRecordStringPropertyCap checks the cap on a record's stored properties,
+// not just on one request: an edit merges into what the record already holds, so
+// a per-request check alone would let edits grow a record without bound. Only
+// caller-set keys count; the nakama-owned keys sit on top of the cap.
+func validateRecordStringPropertyCap(props map[string]string) error {
+	n := 0
+	for k := range props {
+		if !slices.Contains(nakamaStringPropertyKeys, k) {
+			n++
+		}
+	}
+	if n > maxStringProperties {
+		return fmt.Errorf("string_properties: a record holds at most %d caller-set keys, and this edit would leave %d", maxStringProperties, n)
+	}
+	return nil
+}
+
 // nakamaStringProperties returns the nakama-owned facts of r.
 func (r GuildEnforcementRecord) nakamaStringProperties() map[string]string {
 	props := map[string]string{
