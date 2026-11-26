@@ -596,3 +596,74 @@ func TestInheritanceFilter_StringPropertiesEndToEnd(t *testing.T) {
 		t.Fatalf("unfiltered inheritor must inherit: %v", got)
 	}
 }
+
+// A record written before string properties existed has no map. An edit that
+// sets nothing must still be refused with "No changes specified": the
+// nakama-owned keys the merge would add are not a change on their own, so the
+// edit must not append an EditLog entry or bump UpdatedAt.
+func TestEnforcementRecordEditRPC_NoOpEditOnLegacyRecordIsRefused(t *testing.T) {
+	f := newKickLogFixture(t)
+	useSuspensionLogSender(t, &fakeNoticeSender{})
+	runKickRPC(t, f, f.payload(""))
+
+	// Rewrite the stored journal as a legacy one: the record has no map.
+	j := propsLoadJournal(t, f)
+	recs := j.RecordsByGroupID[f.groupID]
+	if len(recs) != 1 {
+		t.Fatalf("records = %d, want 1", len(recs))
+	}
+	recs[0].StringProperties = nil
+	b, err := json.Marshal(j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := f.targetID + ":" + StorageCollectionEnforcementJournal + ":" + StorageKeyEnforcementJournal
+	f.nk.storageObjects[key][0].Value = string(b)
+	legacy := onlyRecord(t, f)
+	if legacy.StringProperties != nil {
+		t.Fatalf("setup: the stored record must have no map, got %v", legacy.StringProperties)
+	}
+
+	_, err = runEditRPC(t, f, nil, f.editPayload(legacy.ID, ""))
+	var rerr *runtime.Error
+	if !errors.As(err, &rerr) || rerr.Code != StatusInvalidArgument || !strings.Contains(rerr.Message, "No changes") {
+		t.Fatalf("err = %#v, want InvalidArgument \"No changes specified\"", err)
+	}
+	stored := onlyRecord(t, f)
+	if len(stored.EditLog) != 0 || !stored.UpdatedAt.Equal(legacy.UpdatedAt) {
+		t.Fatalf("a refused edit must not be written: edit log %d, updated_at %v (was %v)", len(stored.EditLog), stored.UpdatedAt, legacy.UpdatedAt)
+	}
+}
+
+// The Discord edit path (EditRecord) has no community-values input: it must keep
+// the record's CommunityValuesRequired, and still recompute the nakama-owned keys
+// from the edited fields.
+func TestEditRecord_KeepsCommunityValuesAndRecomputesOwnedKeys(t *testing.T) {
+	j := NewGuildEnforcementJournal("u")
+	r := j.AddRecord("g", "e", "ed", "n", "", true, false, time.Hour)
+	j.SetRecordStringProperties("g", r.ID, map[string]string{"tier": "high"})
+	if r.StringProperties[StringPropertyPermanent] != "false" || r.StringProperties[StringPropertyAllowPrivates] != "false" {
+		t.Fatalf("setup: properties = %v", r.StringProperties)
+	}
+
+	got := j.EditRecord("g", r.ID, "editor", "editor-discord", r.CreatedAt.Add(LifetimeSuspensionDuration), "new notice", "new notes", true)
+	if got == nil {
+		t.Fatal("record not found")
+	}
+	if !got.CommunityValuesRequired {
+		t.Fatal("EditRecord must keep the record's community_values_required")
+	}
+	want := map[string]string{
+		"tier":                                "high",
+		StringPropertyPermanent:               "true",
+		StringPropertyAllowPrivates:           "true",
+		StringPropertyCommunityValuesRequired: "true",
+		StringPropertyIsPubliclyVisible:       "false",
+	}
+	if !maps.Equal(got.StringProperties, want) {
+		t.Fatalf("properties after EditRecord = %v, want %v", got.StringProperties, want)
+	}
+	if stored := j.GetRecord("g", r.ID); !stored.CommunityValuesRequired || !maps.Equal(stored.StringProperties, want) {
+		t.Fatalf("the journal's copy: cvr=%v props=%v", stored.CommunityValuesRequired, stored.StringProperties)
+	}
+}
