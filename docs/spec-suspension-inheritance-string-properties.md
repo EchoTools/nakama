@@ -57,8 +57,13 @@ Rules for nakama-owned keys:
 - `string_properties` is stored on the new suspension record. A kick that adds no
   suspension (a void, for example) ignores it.
 - Each key must be non-empty, each key and each value at most 64 bytes, and there
-  are at most 32 keys. Values must be non-empty. Breaking any of these gives
-  `InvalidArgument`, and nothing is written.
+  are at most 32 keys that you set. Nakama-owned keys don't count toward the 32,
+  on a request or on the stored record: if you send one, it is overwritten with a
+  warning, so 32 of your keys plus `permanent` is accepted. Breaking any of these
+  gives `InvalidArgument`, and nothing is written.
+- Values must be non-empty. On an edit, `""` means "delete this key". A new
+  record has nothing to delete, so on a kick an empty value has no meaning and is
+  refused rather than stored.
 - `community_values_required` is accepted. It's the portal's name. The older
   `require_community_values` still works, and either one set to `true` requires
   community values.
@@ -74,8 +79,15 @@ Rules for nakama-owned keys:
 - `string_properties` is **merged** into the record's. A key you send is set, and
   a key sent with value `""` is deleted. Keys you don't send are kept. Leave the
   whole field out to change nothing.
-- `community_values_required` sets the requirement. Leave it out to change
-  nothing.
+- `community_values_required` sets the requirement on the record, and with it the
+  owned property `community_values_required`. Leave it out to change nothing.
+  That property says whether this record requires community values. It doesn't
+  say whether the player has completed them: that is the journal's
+  `community_values_completed_at` (`CommunityValuesCompletedAt`), which the edit
+  does not touch. The two answer different questions, so a record can read
+  `community_values_required = true` for a player who has already completed them,
+  and a filter on the property filters on the record's requirement, not on the
+  player's state.
 - An edit that changes only properties is a real edit. An edit that changes
   nothing at all is still refused with "No changes specified".
 - Same limits as kick, except that `""` is allowed (it deletes).

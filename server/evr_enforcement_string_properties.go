@@ -54,11 +54,25 @@ var nakamaStringPropertyKeys = []string{
 	StringPropertyRuleViolated,
 }
 
+// callerStringPropertyCount returns how many keys of props are caller-set, i.e.
+// not nakama-owned. Only these count toward maxStringProperties.
+func callerStringPropertyCount(props map[string]string) int {
+	n := 0
+	for k := range props {
+		if !slices.Contains(nakamaStringPropertyKeys, k) {
+			n++
+		}
+	}
+	return n
+}
+
 // validateStringProperties checks caller-supplied properties. allowEmptyValue is
-// true for an edit, where an empty value deletes the key.
+// true for an edit, where an empty value deletes the key. Nakama-owned keys in
+// the request do not count toward the cap: they are overwritten (with a warning),
+// never stored as the caller sent them.
 func validateStringProperties(props map[string]string, allowEmptyValue bool) error {
-	if len(props) > maxStringProperties {
-		return fmt.Errorf("string_properties: at most %d keys, got %d", maxStringProperties, len(props))
+	if n := callerStringPropertyCount(props); n > maxStringProperties {
+		return fmt.Errorf("string_properties: at most %d caller-set keys, got %d", maxStringProperties, n)
 	}
 	for k, v := range props {
 		if k == "" {
@@ -82,13 +96,7 @@ func validateStringProperties(props map[string]string, allowEmptyValue bool) err
 // a per-request check alone would let edits grow a record without bound. Only
 // caller-set keys count; the nakama-owned keys sit on top of the cap.
 func validateRecordStringPropertyCap(props map[string]string) error {
-	n := 0
-	for k := range props {
-		if !slices.Contains(nakamaStringPropertyKeys, k) {
-			n++
-		}
-	}
-	if n > maxStringProperties {
+	if n := callerStringPropertyCount(props); n > maxStringProperties {
 		return fmt.Errorf("string_properties: a record holds at most %d caller-set keys, and this edit would leave %d", maxStringProperties, n)
 	}
 	return nil

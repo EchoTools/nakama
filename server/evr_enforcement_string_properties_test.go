@@ -126,6 +126,14 @@ func TestValidateStringProperties(t *testing.T) {
 	for i := range maxStringProperties + 1 {
 		many[fmt.Sprint("k", i)] = "v"
 	}
+	// A full set of caller keys plus every nakama-owned key: only caller keys count.
+	fullWithOwned := map[string]string{}
+	for i := range maxStringProperties {
+		fullWithOwned[fmt.Sprint("k", i)] = "v"
+	}
+	for _, k := range nakamaStringPropertyKeys {
+		fullWithOwned[k] = "x"
+	}
 	long := strings.Repeat("x", maxStringPropertyBytes+1)
 	for _, tc := range []struct {
 		name     string
@@ -138,6 +146,8 @@ func TestValidateStringProperties(t *testing.T) {
 		{"long key", map[string]string{long: "v"}, false, false},
 		{"long value", map[string]string{"k": long}, false, false},
 		{"too many", many, false, false},
+		{"nakama-owned keys do not count on kick", fullWithOwned, false, true},
+		{"nakama-owned keys do not count on edit", fullWithOwned, true, true},
 		{"empty value on kick", map[string]string{"k": ""}, false, false},
 		{"empty value on edit deletes", map[string]string{"k": ""}, true, true},
 	} {
@@ -448,6 +458,35 @@ func TestEnforcementRecordEditRPC_StringPropertyCapHoldsOnRecord(t *testing.T) {
 	}
 	if caller != maxStringProperties {
 		t.Fatalf("stored caller keys = %d, want %d", caller, maxStringProperties)
+	}
+}
+
+// Only caller-set keys count toward the per-request cap. A kick carrying a full
+// set of caller keys plus a nakama-owned key is accepted: the owned key is
+// overwritten with a warning and the record holds exactly the cap in caller keys.
+func TestEnforcementKickRPC_StringPropertyCapExcludesNakamaOwnedKeys(t *testing.T) {
+	parts := make([]string, 0, maxStringProperties+1)
+	for i := range maxStringProperties {
+		parts = append(parts, fmt.Sprintf("%q:\"v\"", fmt.Sprint("a", i)))
+	}
+	parts = append(parts, fmt.Sprintf("%q:\"SECRETVALUE\"", StringPropertyPermanent))
+	f := newKickLogFixture(t)
+	useSuspensionLogSender(t, &fakeNoticeSender{})
+	logger, logs := propsObservedLogger()
+	out, err := EnforcementKickRPC(f.ctx, logger, nil, f.nk, f.payload(`,"string_properties":{`+strings.Join(parts, ",")+`}`))
+	if err != nil {
+		t.Fatalf("a kick with %d caller keys plus a nakama-owned key must be accepted: %v (%s)", maxStringProperties, err, out)
+	}
+	assertOwnedKeysWarned(t, logs, []string{StringPropertyPermanent}, "SECRETVALUE")
+	r := onlyRecord(t, f)
+	var caller int
+	for k := range r.StringProperties {
+		if !slices.Contains(nakamaStringPropertyKeys, k) {
+			caller++
+		}
+	}
+	if caller != maxStringProperties || r.StringProperties[StringPropertyPermanent] != "false" {
+		t.Fatalf("caller keys = %d (want %d), permanent = %q (want nakama's \"false\")", caller, maxStringProperties, r.StringProperties[StringPropertyPermanent])
 	}
 }
 
