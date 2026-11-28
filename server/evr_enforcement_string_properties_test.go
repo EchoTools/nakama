@@ -224,6 +224,23 @@ func TestEnforcementKickRPC_RejectsInvalidStringProperties(t *testing.T) {
 	}
 }
 
+// A kick cannot store an empty property value. A new record has nothing to delete,
+// so "" has no meaning there, and the spec (docs/spec-suspension-inheritance-string-properties.md
+// §2, enforcement/kick) says it is refused rather than stored. The refusal comes
+// before any write, so no enforcement journal is written.
+func TestEnforcementKickRPC_RejectsEmptyStringPropertyValue(t *testing.T) {
+	f := newKickLogFixture(t)
+	useSuspensionLogSender(t, &fakeNoticeSender{})
+	_, err := EnforcementKickRPC(f.ctx, NewRuntimeGoLogger(zap.NewNop()), nil, f.nk, f.payload(`,"string_properties":{"tier":""}`))
+	var rerr *runtime.Error
+	if !errors.As(err, &rerr) || rerr.Code != StatusInvalidArgument {
+		t.Fatalf("err = %#v, want InvalidArgument for an empty value", err)
+	}
+	if _, ok := f.nk.storageObjects[f.targetID+":"+StorageCollectionEnforcementJournal+":"+StorageKeyEnforcementJournal]; ok {
+		t.Fatal("a refused kick must write no enforcement journal")
+	}
+}
+
 // The portal sends community_values_required; the older key keeps working.
 func TestEnforcementKickRPC_AcceptsPortalCommunityValuesKey(t *testing.T) {
 	for _, key := range []string{"community_values_required", "require_community_values"} {
