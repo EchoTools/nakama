@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -28,6 +29,10 @@ type EnforcementKickRequest struct {
 	ReporterUserID         string `json:"reporter_user_id,omitempty"`         // User ID of the player who filed/reported the action (issue #466; empty for operator-initiated kicks)
 	ReportID               string `json:"report_id,omitempty"`                // ID of a linked PlayerReport (see PlayerReport.ID) this action stems from
 	PostToSuspensionLog    *bool  `json:"post_to_suspension_log,omitempty"`   // Post the action to the guild's suspension log channel (defaults to true; send false to opt out)
+	// CommunityValuesRequired is the portal's name for RequireCommunityValues. Either one set to true requires it.
+	CommunityValuesRequired bool `json:"community_values_required,omitempty"`
+	// StringProperties are stored on the new suspension record (see GuildEnforcementRecord.StringProperties).
+	StringProperties map[string]string `json:"string_properties,omitempty"`
 }
 
 // EnforcementKickResponse represents the response from the kick/enforcement RPC
@@ -49,6 +54,11 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
 	}
+	logUnknownJSONKeys(logger, "enforcement/kick", payload, &request)
+	if err := validateStringProperties(request.StringProperties, false); err != nil {
+		return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+	}
+	requireCommunityValues := request.RequireCommunityValues || request.CommunityValuesRequired
 
 	userID, _ := ctx.Value(runtime.RUNTIME_CTX_USER_ID).(string)
 	if userID == "" {
@@ -178,7 +188,12 @@ func EnforcementKickRPC(ctx context.Context, logger runtime.Logger, db *sql.DB, 
 
 		// Add a new suspension record
 		actions = append(actions, fmt.Sprintf("suspension expires <t:%d:R>", suspensionExpiry.UTC().Unix()))
-		record := journal.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, "", request.RequireCommunityValues, allowPrivateLobbies, false, suspensionDuration, request.ReporterUserID, reporterDiscordID, request.ReportID)
+		record := journal.AddRecordWithOptions(groupID, enforcerUserID, enforcerDiscordID, request.UserNotice, request.ModeratorNotes, "", requireCommunityValues, allowPrivateLobbies, false, suspensionDuration, request.ReporterUserID, reporterDiscordID, request.ReportID)
+		if len(request.StringProperties) > 0 {
+			stored, owned := journal.SetRecordStringProperties(groupID, record.ID, request.StringProperties)
+			record = *stored
+			warnNakamaOwnedStringProperties(logger, "enforcement/kick", owned)
+		}
 		recordsByGroupID[groupID] = append(recordsByGroupID[groupID], record)
 		addedRecord = &record
 	} else if voidActiveSuspensions {
@@ -462,6 +477,10 @@ type EnforcementRecordEditRequest struct {
 	UserNotice          string `json:"user_notice"`                     // User-facing notice message (optional)
 	AuditorNotes        string `json:"auditor_notes"`                   // Internal moderator notes (optional, can exceed 200 chars)
 	AllowPrivateLobbies *bool  `json:"allow_private_lobbies,omitempty"` // Whether the user can join private lobbies (optional, nil means no change)
+	// CommunityValuesRequired sets the record's requirement (optional, nil means no change).
+	CommunityValuesRequired *bool `json:"community_values_required,omitempty"`
+	// StringProperties are merged into the record's: an empty value deletes the key (optional).
+	StringProperties map[string]string `json:"string_properties,omitempty"`
 }
 
 // EnforcementRecordEditResponse represents the response from editing an enforcement record
@@ -477,6 +496,10 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	var request EnforcementRecordEditRequest
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return "", runtime.NewError("Invalid request payload", StatusInvalidArgument)
+	}
+	logUnknownJSONKeys(logger, "enforcement/record/edit", payload, &request)
+	if err := validateStringProperties(request.StringProperties, true); err != nil {
+		return "", runtime.NewError(err.Error(), StatusInvalidArgument)
 	}
 
 	// Validate required fields
@@ -550,11 +573,35 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 		newAllowPrivates = *request.AllowPrivateLobbies
 	}
 
-	// Ensure at least one field is actually changing
+	newCommunityValuesRequired := record.CommunityValuesRequired
+	if request.CommunityValuesRequired != nil {
+		newCommunityValuesRequired = *request.CommunityValuesRequired
+	}
+
+	edit := enforcementRecordEdit{
+		Expiry:                  newExpiry,
+		UserNotice:              newUserNotice,
+		AuditorNotes:            newAuditorNotes,
+		AllowPrivateLobbies:     newAllowPrivates,
+		CommunityValuesRequired: newCommunityValuesRequired,
+		StringProperties:        request.StringProperties,
+	}
+
+	// Ensure at least one field is actually changing. The string properties are
+	// compared after the merge, so the nakama-owned keys a legacy record lacks
+	// do not count as a change on their own.
+	preview := previewRecordEdit(*record, edit)
+	if err := validateRecordStringPropertyCap(preview.StringProperties); err != nil {
+		return "", runtime.NewError(err.Error(), StatusInvalidArgument)
+	}
+	before := *record
+	before.mergeStringProperties(nil)
 	if newExpiry.Equal(record.Expiry) &&
 		newUserNotice == record.UserNoticeText &&
 		newAuditorNotes == record.AuditorNotes &&
-		newAllowPrivates == record.AllowPrivateLobbies {
+		newAllowPrivates == record.AllowPrivateLobbies &&
+		newCommunityValuesRequired == record.CommunityValuesRequired &&
+		maps.Equal(preview.StringProperties, before.StringProperties) {
 		return "", runtime.NewError("No changes specified for enforcement record", StatusInvalidArgument)
 	}
 	// Get Discord ID for audit log (optional)
@@ -567,10 +614,11 @@ func EnforcementRecordEditRPC(ctx context.Context, logger runtime.Logger, db *sq
 	}
 
 	// Edit the record (this creates the edit log entry)
-	updatedRecord := journal.EditRecord(request.GroupID, request.RecordID, userID, callerDiscordID, newExpiry, newUserNotice, newAuditorNotes, newAllowPrivates)
+	updatedRecord, owned := journal.ApplyRecordEdit(request.GroupID, request.RecordID, userID, callerDiscordID, edit)
 	if updatedRecord == nil {
 		return "", runtime.NewError("Failed to edit enforcement record", StatusInternalError)
 	}
+	warnNakamaOwnedStringProperties(logger, "enforcement/record/edit", owned)
 
 	// Save the journal and sync to profile with retry logic for concurrent writes
 	if err := SyncJournalAndProfileWithRetry(ctx, nk, request.TargetUserID, journal); err != nil {

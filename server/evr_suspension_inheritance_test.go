@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -545,7 +546,7 @@ func TestGuildGroupUpdateRPC_InheritanceFiltersOmittedKeptEmptyCleared(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := gg.InheritanceFilterFor(inhSrc); got != c.want {
+			if got := gg.InheritanceFilterFor(inhSrc); !reflect.DeepEqual(got, c.want) {
 				t.Fatalf("filter after save = %+v, want %+v (stored %s)", got, c.want, nk.group.Metadata)
 			}
 		})

@@ -31,7 +31,28 @@ type SuspensionInheritanceFilter struct {
 	MinimumDurationSeconds int64 `json:"minimum_duration_seconds,omitempty"`
 	// Scope is InheritScopeAll or InheritScopeFullBans. Empty means InheritScopeAll.
 	Scope string `json:"scope,omitempty"`
+	// ExcludeRules: a record matching any of these is not inherited. Checked first.
+	ExcludeRules []SuspensionInheritanceRule `json:"exclude_rules,omitempty"`
+	// IncludeRules: otherwise, a record matching any of these is inherited.
+	IncludeRules []SuspensionInheritanceRule `json:"include_rules,omitempty"`
+	// Default decides a record that matches no rule: InheritDefaultInclude or
+	// InheritDefaultExclude. Empty means InheritDefaultInclude, which is what every
+	// link did before rules existed.
+	Default string `json:"default,omitempty"`
 }
+
+// SuspensionInheritanceRule matches a record whose string property Key equals
+// Value exactly (case-sensitive, no wildcards). See GuildEnforcementRecord.StringProperty.
+type SuspensionInheritanceRule struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// Values of SuspensionInheritanceFilter.Default.
+const (
+	InheritDefaultInclude = "include"
+	InheritDefaultExclude = "exclude"
+)
 
 // maxInheritanceMinimumDurationSeconds bounds MinimumDurationSeconds so that
 // converting it to a time.Duration cannot overflow. Anything at or above the
@@ -41,7 +62,8 @@ const maxInheritanceMinimumDurationSeconds = int64(LifetimeDurationThreshold / t
 
 // IsDefault reports whether the filter inherits everything.
 func (f SuspensionInheritanceFilter) IsDefault() bool {
-	return f.MinimumDurationSeconds <= 0 && (f.Scope == "" || f.Scope == InheritScopeAll)
+	return f.MinimumDurationSeconds <= 0 && (f.Scope == "" || f.Scope == InheritScopeAll) &&
+		len(f.ExcludeRules) == 0 && len(f.IncludeRules) == 0 && f.Default != InheritDefaultExclude
 }
 
 // Validate rejects a filter that could not have been meant. It runs when a guild
@@ -52,28 +74,84 @@ func (f SuspensionInheritanceFilter) Validate() error {
 	}
 	switch f.Scope {
 	case "", InheritScopeAll, InheritScopeFullBans:
-		return nil
+	default:
+		return fmt.Errorf("scope must be %q or %q, got %q", InheritScopeAll, InheritScopeFullBans, f.Scope)
 	}
-	return fmt.Errorf("scope must be %q or %q, got %q", InheritScopeAll, InheritScopeFullBans, f.Scope)
+	switch f.Default {
+	case "", InheritDefaultInclude, InheritDefaultExclude:
+	default:
+		return fmt.Errorf("default must be %q or %q, got %q", InheritDefaultInclude, InheritDefaultExclude, f.Default)
+	}
+	if err := validateInheritanceRules("exclude_rules", f.ExcludeRules); err != nil {
+		return err
+	}
+	if err := validateInheritanceRules("include_rules", f.IncludeRules); err != nil {
+		return err
+	}
+	for _, r := range f.IncludeRules {
+		if slices.Contains(f.ExcludeRules, r) {
+			return fmt.Errorf("rule %q=%q is in both include_rules and exclude_rules", r.Key, r.Value)
+		}
+	}
+	return nil
 }
 
-// Accepts reports whether the inheriting guild takes this record.
+func validateInheritanceRules(name string, rules []SuspensionInheritanceRule) error {
+	if len(rules) > maxInheritanceRulesList {
+		return fmt.Errorf("%s: at most %d rules, got %d", name, maxInheritanceRulesList, len(rules))
+	}
+	for i, r := range rules {
+		if r.Key == "" {
+			return fmt.Errorf("%s[%d]: key must not be empty", name, i)
+		}
+		if len(r.Key) > maxStringPropertyBytes || len(r.Value) > maxStringPropertyBytes {
+			return fmt.Errorf("%s[%d]: key and value must each be at most %d bytes", name, i, maxStringPropertyBytes)
+		}
+		if slices.Contains(rules[:i], r) {
+			return fmt.Errorf("%s[%d]: duplicate rule %q=%q", name, i, r.Key, r.Value)
+		}
+	}
+	return nil
+}
+
+// Accepts reports whether the inheriting guild takes this record. The gates run
+// in order: scope, minimum duration, then the string-property rules (a match on
+// any exclude rule rejects; otherwise a match on any include rule accepts;
+// otherwise Default decides). A permanent record passes the minimum duration but
+// still faces the rules.
 //
-// An unrecognised scope is treated as InheritScopeAll: Validate stops one being
-// saved, and if one is ever read the failure that keeps a ban in force is
-// preferable to the one that drops it.
+// An unrecognised scope is treated as InheritScopeAll, and an unrecognised
+// Default as InheritDefaultInclude: Validate stops one being saved, and if one is
+// ever read the failure that keeps a ban in force is preferable to the one that
+// drops it.
 func (f SuspensionInheritanceFilter) Accepts(r GuildEnforcementRecord) bool {
 	if f.Scope == InheritScopeFullBans && r.SuspensionExcludesPrivateLobbies() {
 		return false
 	}
 	if f.MinimumDurationSeconds > 0 {
 		d := r.Expiry.Sub(r.CreatedAt)
-		if d >= LifetimeDurationThreshold {
+		if d < LifetimeDurationThreshold && d <= time.Duration(f.MinimumDurationSeconds)*time.Second {
+			return false
+		}
+	}
+	for _, rule := range f.ExcludeRules {
+		if rule.Matches(r) {
+			return false
+		}
+	}
+	for _, rule := range f.IncludeRules {
+		if rule.Matches(r) {
 			return true
 		}
-		return d > time.Duration(f.MinimumDurationSeconds)*time.Second
 	}
-	return true
+	return f.Default != InheritDefaultExclude
+}
+
+// Matches reports whether r carries Key with exactly Value. A record without the
+// key never matches, not even a rule whose Value is empty.
+func (rule SuspensionInheritanceRule) Matches(r GuildEnforcementRecord) bool {
+	v, ok := r.StringProperty(rule.Key)
+	return ok && v == rule.Value
 }
 
 // InheritanceFilterFor returns the filter this guild applies to enforcements
